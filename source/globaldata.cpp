@@ -119,6 +119,7 @@ bool g_ExceptionWarnContinuable = true;
 SingleInstanceType g_AllowOnlyOneInstance = ALLOW_MULTI_INSTANCE;
 #endif
 bool g_persistent = false;  // Whether the script should stay running even after the auto-exec section finishes.
+bool g_ExitApp_on_exception = false; // HH: Whether unhandled exceptions should ExitApp (rather than just Exit thread)
 #ifndef MINIDLL
 HookType g_ExceptionHooksToEnable = NULL;
 bool g_NoTrayIcon = false;

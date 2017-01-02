@@ -112,6 +112,7 @@ extern bool g_ExceptionWarnContinuable;
 extern SingleInstanceType g_AllowOnlyOneInstance;
 #endif
 extern bool g_persistent;
+extern bool g_ExitApp_on_exception;
 #ifndef MINIDLL
 extern HookType g_ExceptionHooksToEnable;
 extern bool g_NoTrayIcon;

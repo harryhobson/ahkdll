@@ -1476,10 +1476,15 @@ ResultType Script::AutoExecSection()
 	// REMEMBER: The ExecUntil() call above will never return if the AutoExec section never finishes
 	// (e.g. infinite loop) or it uses Exit/ExitApp.
 
+	// HH: added unhandled_exception_thrown for use with calling ExitApp down below when the #ExitAppOnException directive is used 
+	bool unhandled_exception_thrown = false;
 	// Check if an exception has been thrown
 	if (g->ThrownToken)
+	{
+		unhandled_exception_thrown = true;
 		// Display an error message
 		ExecUntil_result = g_script.UnhandledException(g->ThrownToken, g->ExcptLine);
+	}
 
 	// The below is done even if AutoExecSectionTimeout() already set the values once.
 	// This is because when the AutoExecute section finally does finish, by definition it's
@@ -1520,7 +1525,8 @@ ResultType Script::AutoExecSection()
 	// If no hotkeys are in effect, the user hasn't requested a hook to be activated, and the script
 	// doesn't contain the #Persistent directive we're done unless there is an OnExit subroutine and it
 	// doesn't do "ExitApp":
-	if (!IS_PERSISTENT) // Resolve macro again in case any of its components changed since the last time.
+	// HH: if unhandled exception has been thrown and the #ExitAppOnException directive is used in the script, then ExitApp rather than just exiting the thread.
+	if (!IS_PERSISTENT || (unhandled_exception_thrown && g_ExitApp_on_exception)) // Resolve macro again in case any of its components changed since the last time.
 		g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
 
 	return OK;
@@ -5575,6 +5581,11 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	if (IS_DIRECTIVE_MATCH(_T("#Persistent")))
 	{
 		g_persistent = true;
+		return CONDITION_TRUE;
+	}
+	if (IS_DIRECTIVE_MATCH(_T("#ExitAppOnException")))
+	{
+		g_ExitApp_on_exception = true;
 		return CONDITION_TRUE;
 	}
 	if (IS_DIRECTIVE_MATCH(_T("#SingleInstance")))
@@ -19743,8 +19754,19 @@ ResultType Script::UnhandledException(ExprTokenType*& aToken, Line* aLine)
 		message = _T("Unhandled exception.");
 	}	
 
+	// HH: if the #ExitAppOnException is set, then notify that the script will abort rather than just the thread exiting
+	LPCTSTR footer;
+	if (g_ExitApp_on_exception)
+	{
+		footer = _T("Aborting script.");
+	}
+	else
+	{
+		footer = _T("The thread has exited.");
+	}
+
 	TCHAR buf[MSGBOX_TEXT_SIZE];
-	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine, _T("The thread has exited."));
+	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine, footer);
 	MsgBox(buf);
 	
 	FreeExceptionToken(aToken);
