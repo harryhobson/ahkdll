@@ -19592,28 +19592,52 @@ ResultType Line::LineError(LPCTSTR aErrorText, ResultType aErrorType, LPCTSTR aE
 
 
 
-int Line::FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine, LPCTSTR aFooter)
+int Line::FormatError(LPTSTR aBuf, int aBufSize, ResultType aErrorType, LPCTSTR aErrorText, LPCTSTR aExtraInfo, Line *aLine, LPCTSTR aFooter, LPCTSTR aWhatInfo, bool custom_format)
 {
+	// HH: modified FormatError to allow optional parameters aWhatInfo and custom_format
+	// HH: a custom exception message format is used if custom_format==true, which also displays aWhatInfo
 	TCHAR source_file[MAX_PATH * 2];
-	if (aLine && aLine->mFileIndex)
-		sntprintf(source_file, _countof(source_file), _T(" in #include file \"%s\""), sSourceFile[aLine->mFileIndex]);
-	else
-		*source_file = '\0'; // Don't bother cluttering the display if it's the main script file.
-
 	LPTSTR aBuf_orig = aBuf;
 	// Error message:
-	aBuf += sntprintf(aBuf, aBufSize, _T("%s%s:%s %-1.500s\n\n")  // Keep it to a sane size in case it's huge.
-		, aErrorType == WARN ? _T("Warning") : (aErrorType == CRITICAL_ERROR ? _T("Critical Error") : _T("Error"))
-		, source_file, *source_file ? _T("\n    ") : _T(" "), aErrorText);
-	// Specifically:
-	if (*aExtraInfo)
-		// Use format specifier to make sure really huge strings that get passed our
-		// way, such as a var containing clipboard text, are kept to a reasonable size:
-		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("Specifically: %-1.100s%s\n\n")
-			, aExtraInfo, _tcslen(aExtraInfo) > 100 ? _T("...") : _T(""));
-	// Relevant lines of code:
-	if (aLine)
-		aBuf = aLine->VicinityToText(aBuf, BUF_SPACE_REMAINING);
+	if (custom_format)
+	{
+		// HH: this is the custom exception message format
+		if (aLine && aLine->mFileIndex)
+			sntprintf(source_file, _countof(source_file), _T("#Include file \"%s\"\n"), sSourceFile[aLine->mFileIndex]);
+		else
+			*source_file = '\0'; // Don't bother cluttering the display if it's the main script file.
+
+		aBuf += sntprintf(aBuf, aBufSize, _T("Fatal Error: %-1.500s\n\n%s")  // Keep it to a sane size in case it's huge.
+			, aErrorText, source_file);
+
+		if (*aWhatInfo)
+			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("What: %s\n"), aWhatInfo);
+
+		if (*aExtraInfo)
+			// Use format specifier to make sure really huge strings that get passed our
+			// way, such as a var containing clipboard text, are kept to a reasonable size:
+			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("Code: %s\n"), aExtraInfo);
+	}
+	else
+	{
+		if (aLine && aLine->mFileIndex)
+			sntprintf(source_file, _countof(source_file), _T(" in #include file \"%s\""), sSourceFile[aLine->mFileIndex]);
+		else
+			*source_file = '\0'; // Don't bother cluttering the display if it's the main script file.
+
+		aBuf += sntprintf(aBuf, aBufSize, _T("%s%s:%s %-1.500s\n\n")  // Keep it to a sane size in case it's huge.
+			, aErrorType == WARN ? _T("Warning") : (aErrorType == CRITICAL_ERROR ? _T("Critical Error") : _T("Error"))
+			, source_file, *source_file ? _T("\n    ") : _T(" "), aErrorText);
+		// Specifically:
+		if (*aExtraInfo)
+			// Use format specifier to make sure really huge strings that get passed our
+			// way, such as a var containing clipboard text, are kept to a reasonable size:
+			aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("Specifically: %-1.100s%s\n\n")
+				, aExtraInfo, _tcslen(aExtraInfo) > 100 ? _T("...") : _T(""));
+		// Relevant lines of code:
+		if (aLine)
+			aBuf = aLine->VicinityToText(aBuf, BUF_SPACE_REMAINING);
+	}
 	// What now?:
 	if (aFooter)
 		aBuf += sntprintf(aBuf, BUF_SPACE_REMAINING, _T("\n%s"), aFooter);
@@ -19709,8 +19733,12 @@ ResultType Script::ScriptError(LPCTSTR aErrorText, LPCTSTR aExtraInfo) //, Resul
 
 ResultType Script::UnhandledException(ExprTokenType*& aToken, Line* aLine)
 {
-	LPCTSTR message = _T(""), extra = _T("");
-	TCHAR extra_buf[MAX_NUMBER_SIZE], message_buf[MAX_NUMBER_SIZE];
+	// HH: Exception objects with the parameter custom_format will have a different exception message format
+	// HH: added 'what' information for use with the custom exception format.
+	LPCTSTR message = _T(""), extra = _T(""), what = _T("");
+	TCHAR extra_buf[MAX_NUMBER_SIZE], message_buf[MAX_NUMBER_SIZE], what_buf[MAX_NUMBER_SIZE];
+	// HH: custom_format defaults to false if undeclared, don't want to override default behaviour
+	bool custom_format = false;
 
 	if (Object *ex = dynamic_cast<Object *>(TokenToObject(*aToken)))
 	{
@@ -19718,6 +19746,12 @@ ResultType Script::UnhandledException(ExprTokenType*& aToken, Line* aLine)
 		ExprTokenType t;
 		if (ex->GetItem(t, _T("Message")))
 			message = TokenToString(t, message_buf);
+		// HH: 'what' info is only used with custom_format
+		if (ex->GetItem(t, _T("what")))
+			what = TokenToString(t, what_buf);
+		// HH: get the custom_format parameter if declared
+		if (ex->GetItem(t, _T("custom_format")))
+			custom_format = TokenToBOOL(t);
 		if (ex->GetItem(t, _T("Extra")))
 			extra = TokenToString(t, extra_buf);
 		if (ex->GetItem(t, _T("Line")))
@@ -19766,7 +19800,8 @@ ResultType Script::UnhandledException(ExprTokenType*& aToken, Line* aLine)
 	}
 
 	TCHAR buf[MSGBOX_TEXT_SIZE];
-	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine, footer);
+	// HH: added 'what' and 'custom_format' optional parameters to FormatError
+	Line::FormatError(buf, _countof(buf), FAIL, message, extra, aLine, footer, what, custom_format);
 	MsgBox(buf);
 	
 	FreeExceptionToken(aToken);
