@@ -696,6 +696,14 @@ void Script::Destroy()
 		free(Line::sDerefBuf);
 		Line::sDerefBuf = NULL;
 	}
+#ifndef MINIDLL
+	for (HotkeyCriterion *expr = g_FirstHotCriterion, *nextexpr; expr;)
+	{
+		nextexpr = expr->NextCriterion;
+		free(expr);
+		expr = nextexpr;
+	}
+#endif
 	Script::~Script(); // destroy main script before resetting variables
 
 	mVarCount = 0;
@@ -759,15 +767,8 @@ void Script::Destroy()
 	g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
 	g_InputLevel = 0;
 #ifndef MINIDLL
-	g_HotCriterion = HOT_NO_CRITERION;
-	g_HotWinTitle = _T(""); // In spite of the above being the primary indicator,
-	g_HotWinText = _T("");  // these are initialized for maintainability.
 	g_FirstHotCriterion = NULL;
 	g_LastHotCriterion = NULL;
-	g_HotExprIndex = -1; // The index of the Line containing the expression defined by the most recent #if (expression) directive.
-	g_HotExprLines = NULL; // Array of pointers to expression lines, allocated when needed.
-	g_HotExprLineCount = 0; // Number of expression lines currently present.
-	g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
 	g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 	g_HotExprLFW = NULL; // Last Found Window of last #if expression.
 	g_MenuIsVisible = MENU_TYPE_NONE;
@@ -890,7 +891,7 @@ void Script::Destroy()
 	free(g_input.match);
 #endif
 	Line::sLogNext = 0;
-	memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
+	g_memset(Line::sLog,NULL,sizeof(Line*) * LINE_LOG_SIZE);
 	SimpleHeap::DeleteAll();
 	//ZeroMemory(&g_script, sizeof(g_script));
 #ifndef MINIDLL
@@ -918,16 +919,6 @@ ResultType Script::Init(global_struct &g, LPTSTR aScriptFilename, bool aIsRestar
 {
 	mIsRestart = aIsRestart;
 	TCHAR buf[2048]; // Just to make sure we have plenty of room to do things with.
-	g_default_pwd0 = 'A';
-	g_default_pwd1 = 'u';
-	g_default_pwd2 = 't';
-	g_default_pwd3 = 'o';
-	g_default_pwd4 = 'H';
-	g_default_pwd5 = 'o';
-	g_default_pwd6 = 't';
-	g_default_pwd7 = 'k';
-	g_default_pwd8 = 'e';
-	g_default_pwd9 = 'y';
 #ifdef AUTOHOTKEYSC
 	// Fix for v1.0.29: Override the caller's use of __argv[0] by using GetModuleFileName(),
 	// so that when the script is started from the command line but the user didn't type the
@@ -3672,9 +3663,9 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 	else
 	{
 		HGLOBAL hResData;
-		if ((!g_hMemoryModule && !( (textbuf.mLength = g_SizeofResource(g_hInstance, g_hResource))
-			&& (hResData = g_LoadResource(g_hInstance, g_hResource))
-			&& (textbuf.mBuffer = g_LockResource(hResData)) ) )
+		if ((!g_hMemoryModule && !( (textbuf.mLength = SizeofResource(g_hInstance, g_hResource))
+			&& (hResData = LoadResource(g_hInstance, g_hResource))
+			&& (textbuf.mBuffer = LockResource(hResData)) ) )
 			|| (g_hMemoryModule && !((textbuf.mLength = MemorySizeOfResource(g_hMemoryModule, g_hResource))
 			&& (textbuf.mBuffer = MemoryLoadResource(g_hMemoryModule, g_hResource))) ) )
 		{
@@ -3683,17 +3674,28 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 		}
 		if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 		{
+#ifndef _USRDLL
+			if (!AHKModule())
+				return FAIL;
+#endif
 			LPVOID aDataBuf;
+			for (int i = 0; i < 10; i++)
+				*g_default_pwd[i] = i + 1;
 			aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 			if (aSizeDeCompressed)
 			{
 				AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-				memmove(buff, aDataBuf, aSizeDeCompressed);
-				memset((char*)buff + aSizeDeCompressed, 0, 2);
-				SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
+				memcpy(buff, aDataBuf, aSizeDeCompressed);
+				g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+				g_memset(aDataBuf, 0, aSizeDeCompressed);
+				free(aDataBuf);
 				textbuf.mLength = aSizeDeCompressed + 2;
 				textbuf.mBuffer = buff;
+#ifndef _USRDLL
+				if (!AHKModule())
+					return FAIL;
+				MemoryFreeLibrary(g_hNTDLL);
+#endif
 			}
 		}
 		fp = &tmem;
@@ -3704,35 +3706,45 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 
 #else // Stand-alone mode (there are no include files in this mode since all of them were merged into the main script at the time of compiling).
 	HRSRC hRes;
-	HGLOBAL hResData;
 
 #ifdef _DEBUG
 	hRes = FindResource(NULL, _T("AHK"), RT_RCDATA);
 #else
 	hRes = FindResource(NULL, _T("E4847ED08866458F8DD35F94B37001C0"), RT_RCDATA);
 #endif
-	
+	HGLOBAL hResData;
 	if ( !( hRes 
-			&& (textbuf.mLength = g_SizeofResource(NULL, hRes))
-			&& (hResData = g_LoadResource(NULL, hRes))
-			&& (textbuf.mBuffer = g_LockResource(hResData)) ) )
+			&& (textbuf.mLength = SizeofResource(NULL, hRes))
+			&& (hResData = LoadResource(NULL, hRes))
+			&& (textbuf.mBuffer = LockResource(hResData)) ) )
 	{
 		MsgBox(_T("Could not extract script from EXE."), 0, aFileSpec);
 		return FAIL;
 	}
 	if (*(unsigned int*)textbuf.mBuffer == 0x04034b50)
 	{
+#ifndef _USRDLL
+		if (!AHKModule())
+			return FAIL;
+#endif
 		LPVOID aDataBuf;
+		for (int i = 0; i < 10; i++)
+			*g_default_pwd[i] = i + 1;
 		aSizeDeCompressed = DecompressBuffer(textbuf.mBuffer, aDataBuf, textbuf.mLength, g_default_pwd);
 		if (aSizeDeCompressed)
 		{
 			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // +2 for terminator, will be freed when function returns
-			memmove(buff,aDataBuf,aSizeDeCompressed);
-			memset((char*)buff + aSizeDeCompressed, 0, 2);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			g_VirtualFree(aDataBuf,0,MEM_RELEASE);
+			memcpy(buff, aDataBuf, aSizeDeCompressed);
+			g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
 			textbuf.mLength = aSizeDeCompressed + 2;
 			textbuf.mBuffer = buff;
+#ifndef _USRDLL
+			if (!AHKModule())
+				return FAIL;
+			MemoryFreeLibrary(g_hNTDLL);
+#endif
 		}
 	}
 	fp = &tmem;
@@ -4034,7 +4046,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 						if (buf_length + next_buf_length >= LINE_SIZE - 1) // -1 to account for the extra space added below.
 						{
 							if (aSizeDeCompressed)
-								SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+								g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 							return ScriptError(ERR_CONTINUATION_SECTION_TOO_LONG, next_buf);
 						}
 						if (*next_buf != ',') // Insert space before expression operators so that built/combined expression works correctly (some operators like 'and', 'or', '.', and '?' currently require spaces on either side) and also for readability of ListLines.
@@ -4154,7 +4166,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			if (next_buf_length == -1) // Compare directly to -1 since length is unsigned.
 			{
 				if (aSizeDeCompressed)
-					SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(ERR_MISSING_CLOSE_PAREN, buf);
 			}
 			if (next_buf_length == -2) // v1.0.45.03: Special flag that means "this is a commented-out line to be
@@ -4222,7 +4234,7 @@ ResultType Script::LoadIncludedFile(LPTSTR aFileSpec, bool aAllowDuplicateInclud
 			if (buf_length + next_buf_length + suffix_length >= LINE_SIZE)
 			{
 				if (aSizeDeCompressed)
-					SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(ERR_CONTINUATION_SECTION_TOO_LONG, cp);
 			}
 
@@ -4301,7 +4313,7 @@ process_completed_line:
 						// script readability and maintainability -- it's currently not allowed because of
 						// the practice of maintaining the func_global_var list on our stack:
 						if (aSizeDeCompressed)
-							SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+							g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 						return ScriptError(_T("Functions cannot contain functions."), pending_buf);
 					}
 					if (!DefineFunc(pending_buf, func_global_var))
@@ -4316,7 +4328,7 @@ process_completed_line:
 #ifdef _DEBUG
 				default:
 					if (aSizeDeCompressed)
-						SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+						g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 					return ScriptError(_T("DEBUG: pending_buf_type has an unexpected value."));
 #endif
 				}
@@ -4326,13 +4338,13 @@ process_completed_line:
 				if (pending_buf_type != Pending_Func) // Missing open-brace for class definition.
 				{
 					if (aSizeDeCompressed)
-						SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+						g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 					return ScriptError(ERR_MISSING_OPEN_BRACE, pending_buf);
 				}
 				if (mClassObjectCount && !g->CurrentFunc) // Unexpected function call in class definition.
 				{
 					if (aSizeDeCompressed)
-						SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+						g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 					return ScriptError(mClassProperty ? ERR_MISSING_OPEN_BRACE : ERR_INVALID_LINE_IN_CLASS_DEF, pending_buf);
 				}
 				if (!ParseAndAddLine(pending_buf, ACT_EXPRESSION))
@@ -4415,7 +4427,7 @@ process_completed_line:
 				}
 			}
 			if (aSizeDeCompressed)
-				SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+				g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 			return ScriptError(ERR_INVALID_LINE_IN_PROPERTY_DEF, buf);
 		}
 
@@ -4494,7 +4506,7 @@ process_completed_line:
 				}
 				// Anything not already handled above is not valid directly inside a class definition.
 				if (aSizeDeCompressed)
-					SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(ERR_INVALID_LINE_IN_CLASS_DEF, buf);
 			}
 		}
@@ -4638,14 +4650,14 @@ examine_line:
 				// safely exist inside a function body and since the body is a block, other validation
 				// ensures that a Gosub or Goto can't jump to it from outside the function.
 				if (aSizeDeCompressed)
-					SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(_T("Hotkeys/hotstrings are not allowed inside functions."), buf);
 			}
 			if (mLastLine && mLastLine->mActionType == ACT_IFWINACTIVE)
 			{
 				mCurrLine = mLastLine; // To show vicinity lines.
 				if (aSizeDeCompressed)
-					SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(_T("IfWin should be #IfWin."), buf);
 			}
 			*hotkey_flag = '\0'; // Terminate so that buf is now the label itself.
@@ -4787,7 +4799,7 @@ examine_line:
 					// best to report it this way in case the hotstring is inside a #Include file,
 					// so that the correct file name and approximate line number are shown:
 					if (aSizeDeCompressed)
-						SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+						g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 					return ScriptError(_T("This hotstring is missing its abbreviation."), buf); // Display buf vs. hotkey_flag in case the line is simply "::::".
 				}
 				// In the case of hotstrings, hotstring_start is the beginning of the hotstring itself,
@@ -4823,13 +4835,13 @@ examine_line:
 						{
 							mCurrLine = NULL;  // Prevents showing unhelpful vicinity lines.
 							if (aSizeDeCompressed)
-								SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+								g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 							return ScriptError(_T("Duplicate hotkey."), buf);
 						}
 						if (!hk->AddVariant(mLastLabel, suffix_has_tilde))
 						{
 							if (aSizeDeCompressed)
-								SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+								g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 							return ScriptError(ERR_OUTOFMEM, buf);
 						}
 						if (hook_is_mandatory || (!g_os.IsWin9x() && g_ForceKeybdHook))
@@ -4872,7 +4884,7 @@ examine_line:
 			if (buf_length == 1) // v1.0.41.01: Properly handle the fact that this line consists of only a colon.
 			{
 				if (aSizeDeCompressed)
-					SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+					g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 				return ScriptError(ERR_UNRECOGNIZED_ACTION, buf);
 			}
 			// Labels (except hotkeys) must contain no whitespace, delimiters, or escape-chars.
@@ -5064,7 +5076,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 		if (pending_buf_type != Pending_Func)
 		{
 			if (aSizeDeCompressed)
-				SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+				g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 			return ScriptError(pending_buf_has_brace ? ERR_MISSING_CLOSE_BRACE : ERR_MISSING_OPEN_BRACE, pending_buf);
 		}
 		if (!ParseAndAddLine(pending_buf, ACT_EXPRESSION)) // Must be function call vs. definition since otherwise the above would have detected the opening brace beneath it and already cleared pending_function.
@@ -5073,7 +5085,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 	}
 
 	if (aSizeDeCompressed) // clear memory of protected script since it is not required anymore
-		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+		g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 	if (mClassObjectCount && !source_file_index) // or mClassProperty, which implies mClassObjectCount != 0.
 	{
 		// A class definition has not been closed with "}".  Previously this was detected by adding
@@ -5090,7 +5102,7 @@ continue_main_loop: // This method is used in lieu of "continue" for performance
 	return OK;
 FAIL:
 	if (aSizeDeCompressed) // clear memory of protected script since it is not required anymore
-		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
+		g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
 	return FAIL;
 }
 
@@ -5324,7 +5336,7 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 	{
 		DWORD aSizeEncrypted = LINE_SIZE * sizeof(TCHAR);
 		BYTE *data = (BYTE*)malloc(LINE_SIZE * sizeof(TCHAR));
-		g_CryptStringToBinary(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
+		CryptStringToBinary(aBuf, NULL, CRYPT_STRING_BASE64, data, &aSizeEncrypted, NULL, NULL);
 		LPVOID aDataBuf;
 		if (*(unsigned int*)data == 0x04034b50)
 		{
@@ -5335,8 +5347,8 @@ size_t Script::GetLine(LPTSTR aBuf, int aMaxCharsToRead, int aInContinuationSect
 #else
 				aBuf_length = UTF8ToASCII((unsigned char*)aBuf, aMaxCharsToRead, (unsigned char*)aDataBuf, aSizeEncrypted) - 1;
 #endif
-				SecureZeroMemory(aDataBuf, aSizeEncrypted);
-				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
+				g_memset(aDataBuf, 0, aSizeEncrypted);
+				free(aDataBuf);
 			}
 			else
 				return -1;
@@ -5634,12 +5646,16 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 	{
 		if (!parameter) // The omission of the parameter indicates that any existing criteria should be turned off.
 		{
-			g_HotCriterion = HOT_NO_CRITERION; // Indicate that no criteria are in effect for subsequent hotkeys.
-			g_HotWinTitle = _T(""); // Helps maintainability and some things might rely on it.
-			g_HotWinText = _T("");  //
-			g_HotExprIndex = -1;
+			g_HotCriterion = NULL; // Indicate that no criteria are in effect for subsequent hotkeys.
 			return CONDITION_TRUE;
 		}
+
+		// Check for a duplicate #If expression;
+		//  - Prevents duplicate hotkeys under separate copies of the same expression.
+		//  - Hotkey,If would only be able to select the first expression with the given source code.
+		//  - Conserves memory.
+		if (g_HotCriterion = FindHotkeyIfExpr(parameter))
+			return CONDITION_TRUE;
 		
 		Func *current_func = g->CurrentFunc;
 		g->CurrentFunc = NULL; // Use global scope.
@@ -5654,19 +5670,12 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		Line *hot_expr_line = mLastLine;
 
 		// Set the new criterion.
-		g_HotCriterion = HOT_IF_EXPR;
-		// Use the expression text to identify hotkey variants.
-		g_HotWinTitle = hot_expr_line->mArg[0].text;
-		g_HotWinText = _T("");
-		if (g_HotExprLineCount + 1 > g_HotExprLineCountMax)
-		{	// Allocate or reallocate g_HotExprLines.
-			g_HotExprLineCountMax += 100;
-			g_HotExprLines = (Line**)realloc(g_HotExprLines, g_HotExprLineCountMax * sizeof(Line**));
-			if (!g_HotExprLines)
-				return ScriptError(ERR_OUTOFMEM);
-		}
-		g_HotExprIndex = g_HotExprLineCount++;
-		g_HotExprLines[g_HotExprIndex] = hot_expr_line;
+		if (  !(g_HotCriterion = AddHotkeyIfExpr())  )
+			return FAIL;
+		g_HotCriterion->Type = HOT_IF_EXPR;
+		g_HotCriterion->ExprLine = hot_expr_line;
+		g_HotCriterion->WinTitle = hot_expr_line->mArg[0].text;
+		g_HotCriterion->WinText = _T("");
 		return CONDITION_TRUE;
 	}
 
@@ -5680,19 +5689,17 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 
 	if (!_tcsnicmp(aBuf, _T("#IfWin"), 6))
 	{
+		HotCriterionType hot_criterion;
 		bool invert = !_tcsnicmp(aBuf + 6, _T("Not"), 3);
 		if (!_tcsnicmp(aBuf + (invert ? 9 : 6), _T("Active"), 6)) // It matches #IfWin[Not]Active.
-			g_HotCriterion = invert ? HOT_IF_NOT_ACTIVE : HOT_IF_ACTIVE;
+			hot_criterion = invert ? HOT_IF_NOT_ACTIVE : HOT_IF_ACTIVE;
 		else if (!_tcsnicmp(aBuf + (invert ? 9 : 6), _T("Exist"), 5))
-			g_HotCriterion = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
+			hot_criterion = invert ? HOT_IF_NOT_EXIST : HOT_IF_EXIST;
 		else // It starts with #IfWin but isn't Active or Exist: Don't alter g_HotCriterion.
 			return CONDITION_FALSE; // Indicate unknown directive since there are currently no other possibilities.
-		g_HotExprIndex = -1;	// L4: For consistency, don't allow mixing of #if and other #ifWin criterion.
 		if (!parameter) // The omission of the parameter indicates that any existing criteria should be turned off.
 		{
-			g_HotCriterion = HOT_NO_CRITERION; // Indicate that no criteria are in effect for subsequent hotkeys.
-			g_HotWinTitle = _T(""); // Helps maintainability and some things might rely on it.
-			g_HotWinText = _T("");  //
+			g_HotCriterion = NULL; // Indicate that no criteria are in effect for subsequent hotkeys.
 			return CONDITION_TRUE;
 		}
 		LPTSTR hot_win_title = parameter, hot_win_text; // Set default for title; text is determined later.
@@ -5742,7 +5749,7 @@ inline ResultType Script::IsDirective(LPTSTR aBuf)
 		ConvertEscapeSequences(hot_win_title, g_EscapeChar, true);
 		// The following also handles the case where both title and text are blank, which could happen
 		// due to something weird but legit like: #IfWinActive, ,
-		if (!SetGlobalHotTitleText(hot_win_title, hot_win_text))
+		if (!SetHotkeyCriterion(hot_criterion, hot_win_title, hot_win_text))
 			return ScriptError(ERR_OUTOFMEM); // So rare that no second param is provided (since its contents may have been temp-terminated or altered above).
 		return CONDITION_TRUE;
 	} // Above completely handles all directives and non-directives that start with "#IfWin".
@@ -10435,9 +10442,9 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		g_hWinAPI = (LPSTR)malloc(szWinApi + sizeof(char));
 		g_hWinAPIlowercase = (LPSTR)malloc(szWinApi + sizeof(char));
 		// copy definitions and free memory allocated by DecompressBuffer
-		memmove(g_hWinAPI, aDataBuf, szWinApi);
-		memmove(g_hWinAPIlowercase, aDataBuf, szWinApi);
-		VirtualFree(aDataBuf, 0, MEM_RELEASE);
+		memcpy(g_hWinAPI, aDataBuf, szWinApi);
+		memcpy(g_hWinAPIlowercase, aDataBuf, szWinApi);
+		free(aDataBuf);
 		// terminate string
 		*(g_hWinAPI + szWinApi) = '\0';
 		*(g_hWinAPIlowercase + szWinApi) = '\0';
@@ -10704,10 +10711,10 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 		if (aSizeDeCompressed)
 		{
 			AUTO_MALLOCA(buff, LPVOID, aSizeDeCompressed + 2); // + 2 for terminator, memory will be freed when function returns
-			memmove(buff,aDataBuf,aSizeDeCompressed);
-			memset((char*)buff + aSizeDeCompressed, 0, 2);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf,0,MEM_RELEASE);
+			memcpy(buff,aDataBuf,aSizeDeCompressed);
+			g_memset((char*)buff + aSizeDeCompressed, 0, 2);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
 			textbuf.mLength = aSizeDeCompressed + 2;
 			textbuf.mBuffer = buff;
 		}
@@ -10748,8 +10755,8 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	if (!LoadIncludedText(resource_script, class_name_buf)) // Fix for v1.0.47.05: Pass false for allow-dupe because otherwise, it's possible for a stdlib file to attempt to include itself (especially via the LibNamePrefix_ method) and thus give a misleading "duplicate function" vs. "func does not exist" error message.  Obsolete: For performance, pass true for allow-dupe so that it doesn't have to check for a duplicate file (seems too rare to worry about duplicates since by definition, the function doesn't yet exist so it's file shouldn't yet be included).
 	{
 		if (aSizeDeCompressed)
-			SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
-		SecureZeroMemory(resource_script, textbuf.mLength + sizeof(TCHAR));
+			g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
+		g_memset(resource_script, 0, textbuf.mLength + sizeof(TCHAR));
 		g->CurrentFunc = current_func; // Restore.
 		aErrorWasShown = true; // Above has just displayed its error (e.g. syntax error in a line, failed to open the include file, etc).  So override the default set earlier.
 		_freea(resource_script);
@@ -10757,14 +10764,14 @@ Func *Script::FindFuncInLibrary(LPTSTR aFuncName, size_t aFuncNameLength, bool &
 	}
 
 	if (aSizeDeCompressed)
-		SecureZeroMemory(textbuf.mBuffer, aSizeDeCompressed);
-	SecureZeroMemory(resource_script, textbuf.mLength * sizeof(TCHAR));
+		g_memset(textbuf.mBuffer, 0, aSizeDeCompressed);
+	g_memset(resource_script, 0, textbuf.mLength * sizeof(TCHAR));
 	_freea(resource_script);
 	g->CurrentFunc = current_func; // Restore.
 	return FindFunc(aFuncName, aFuncNameLength);
 winapi:
 	TCHAR parameter[512] = { L'#', L'D', L'l', L'l', L'I', L'm', L'p', L'o', L'r', L't', L',' }; // Should be enough room for any dll function definition
-	memmove(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
+	memcpy(&parameter[11], aFuncName, aFuncNameLength*sizeof(TCHAR));
 	parameter[aFuncNameLength + 11] = L',';
 	parameter[aFuncNameLength + 12] = L'\0';
 
@@ -10927,7 +10934,7 @@ winapi:
 			_tcscpy(aDest, _T(",,"));
 			aDest = aDest + 2;
 		}
-		memset(aDest - 2, 0, 2 * sizeof(TCHAR));
+		g_memset(aDest - 2, 0, 2 * sizeof(TCHAR));
 		if (mIncludeLibraryFunctionsThenExit && aIsAutoInclude)
 		{
 			// For each auto-included library-file, write out two #Include lines:
@@ -12704,7 +12711,7 @@ ResultType Script::PreparseStaticLines(Line *aStartingLine)
 			mLastStaticLine = line;
 			break;
 		case ACT_HOTKEY_IF:
-			// It's already been added to g_HotExprLines[], so just remove it from the script (below).
+			// It's already been added to the hot-expr list, so just remove it from the script (below).
 			// Override mActionType so ACT_HOTKEY_IF doesn't have to be handled by EvaluateCondition():
 			line->mActionType = ACT_IFEXPR;
 			break;
@@ -13147,12 +13154,13 @@ Line *Script::PreparseCommands(Line *aStartingLine)
 							// as required by the Hotkey command.  This seems worth doing since the current
 							// behaviour might be unexpected (despite being documented), and because typos
 							// are likely due to the fact that case and whitespace matter.
-							int i;
-							for (i = 0; i < g_HotExprLineCount; ++i)
-								if (!_tcscmp(line_raw_arg2, g_HotExprLines[i]->mArg[0].text))
+							for (HotkeyCriterion *cp = g_FirstHotExpr; ; cp = cp->NextCriterion)
+							{
+								if (!cp)
+									return line->PreparseError(ERR_HOTKEY_IF_EXPR);
+								if (!_tcscmp(line_raw_arg2, cp->WinTitle))
 									break;
-							if (i == g_HotExprLineCount)
-								return line->PreparseError(_T("Parameter #2 must match an existing #If expression."));
+							}
 						}
 						break;
 					}
@@ -16211,9 +16219,26 @@ ResultType Line::EvaluateCondition() // __forceinline on this reduces benchmarks
 	return if_condition ? CONDITION_TRUE : CONDITION_FALSE;
 }
 
-// L4: Evaluate an expression used to define #if hotkey variant criterion.
-//	This is called by MainWindowProc when it receives an AHK_HOT_IF_EXPR message.
-ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
+
+// Evaluate an #If expression (in a thread created by the caller).
+ResultType Line::EvaluateHotCriterionExpression()
+{
+	g_script.mCurrLine = this; // Added in v1.1.16 to fix A_LineFile and A_LineNumber.
+
+	if (g->ListLinesIsEnabled)
+		LOG_LINE(this)
+
+	ResultType result = ExpandArgs();
+	if (result == OK)
+		result = EvaluateCondition();
+
+	return result;
+}
+
+
+// Evaluate an #If expression or callback function.
+// This is called by MainWindowProc when it receives an AHK_HOT_IF_EVAL message.
+ResultType HotkeyCriterion::Eval(LPTSTR aHotkeyName)
 {
 	// Initialize a new quasi-thread to evaluate the expression. This may not be necessary for simple
 	// expressions, but expressions which call user-defined functions may otherwise interfere with
@@ -16230,7 +16255,6 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	// Critical seems to improve reliability, either because the thread completes faster (i.e. before the timeout) or because we check for messages less often.
 	InitNewThread(0, false, true, ACT_CRITICAL);
 	ResultType result;
-	DEBUGGER_STACK_PUSH(_T("#If"))
 
 #ifndef MINIDLL
 	// Update A_ThisHotkey, useful if #If calls a function to do its dirty work.
@@ -16242,15 +16266,21 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	g_script.mThisHotkeyStartTime = // Updated for consistency.
 	g_script.mLastScriptRest = g_script.mLastPeekTime = GetTickCount();
 #endif
-	g_script.mCurrLine = this; // Added in v1.1.16 to fix A_LineFile and A_LineNumber.
-
-	if (g->ListLinesIsEnabled)
-		LOG_LINE(this)
-
-	// EVALUATE THE EXPRESSION
-	result = ExpandArgs();
-	if (result == OK)
-		result = EvaluateCondition();
+	// EVALUATE THE EXPRESSION OR CALL THE CALLBACK
+	if (Type == HOT_IF_EXPR)
+	{
+		DEBUGGER_STACK_PUSH(_T("#If"))
+		result = ExprLine->EvaluateHotCriterionExpression();
+		DEBUGGER_STACK_POP()
+	}
+	else
+	{
+		ExprTokenType param = aHotkeyName;
+		INT_PTR retval;
+		result = LabelPtr(Callback)->ExecuteInNewThread(_T("#If"), &param, 1, &retval);
+		if (result != FAIL)
+			result = retval ? CONDITION_TRUE : CONDITION_FALSE;
+	}
 
 #ifndef MINIDLL
 	// The following allows the expression to set the Last Found Window for the
@@ -16267,7 +16297,6 @@ ResultType Line::EvaluateHotCriterionExpression(LPTSTR aHotkeyName)
 	g_script.mPriorHotkeyStartTime = prior_hotkey_time[1];
 #endif
 
-	DEBUGGER_STACK_POP()
 	ResumeUnderlyingThread(ErrorLevel_saved);
 
 	return result;

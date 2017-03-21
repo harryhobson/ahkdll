@@ -33,16 +33,11 @@ GNU General Public License for more details.
 FuncLibrary sLib[FUNC_LIB_COUNT] = { 0 }; // function libraries
 LPSTR g_hWinAPI = NULL, g_hWinAPIlowercase = NULL;  // loads WinAPI functions definitions from resource
 #endif
-_LoadResource g_LoadResource = NULL;
-_SizeofResource g_SizeofResource = NULL;
-_LockResource g_LockResource = NULL;
-_CryptStringToBinary g_CryptStringToBinary = NULL;
-_CryptStringToBinaryA g_CryptStringToBinaryA = NULL;
-_VirtualAlloc g_VirtualAlloc = NULL;
-_VirtualFree g_VirtualFree = NULL;
-_HashData g_HashData = NULL;
 HRSRC g_hResource = NULL; // Set by WinMain() // for compiled AutoHotkey.exe
-HCUSTOMMODULE g_hMSVCR = NULL; // MSVR100.dll
+HCUSTOMMODULE g_hNTDLL = NULL; // MSVR100.dll
+_QueryPerformanceCounter g_QPC = NULL;
+double g_QPCtimer = 0.0;
+double g_QPCfreq = 0.0;
 #ifdef _USRDLL
 bool g_Reloading = false;
 bool g_Loading = false;
@@ -166,18 +161,13 @@ int g_HotkeyThrottleInterval = 2000; // Milliseconds.
 bool g_MaxThreadsBuffer = false;  // This feature usually does more harm than good, so it defaults to OFF.
 SendLevelType g_InputLevel = 0;
 #ifndef MINIDLL
-HotCriterionType g_HotCriterion = HOT_NO_CRITERION;
-LPTSTR g_HotWinTitle = _T(""); // In spite of the above being the primary indicator,
-LPTSTR g_HotWinText = _T("");  // these are initialized for maintainability.
+HotkeyCriterion *g_HotCriterion = NULL; // The current criterion for new hotkeys.
 HotkeyCriterion *g_FirstHotCriterion = NULL, *g_LastHotCriterion = NULL;
 
 // Global variables for #if (expression).
-int g_HotExprIndex = -1; // The index of the Line containing the expression defined by the most recent #if (expression) directive.
-Line **g_HotExprLines = NULL; // Array of pointers to expression lines, allocated when needed.
-int g_HotExprLineCount = 0; // Number of expression lines currently present.
-int g_HotExprLineCountMax = 0; // Current capacity of g_HotExprLines.
 UINT g_HotExprTimeout = 1000; // Timeout for #if (expression) evaluation, in milliseconds.
 HWND g_HotExprLFW = NULL; // Last Found Window of last #if expression.
+HotkeyCriterion *g_FirstHotExpr = NULL, *g_LastHotExpr = NULL;
 
 static int GetScreenDPI()
 {
@@ -297,6 +287,8 @@ TCHAR g_default_pwd8;
 TCHAR g_default_pwd9;
 TCHAR *g_default_pwd[] = { &g_default_pwd0, &g_default_pwd1, &g_default_pwd2, &g_default_pwd3, &g_default_pwd4, &g_default_pwd5, &g_default_pwd6, &g_default_pwd7, &g_default_pwd8, &g_default_pwd9, 0, 0 };
 
+MyCryptEncrypt g_CryptEncrypt = NULL;
+MyCryptDecrypt g_CryptDecrypt = NULL;
 // The order of initialization here must match the order in the enum contained in script.h
 // It's in there rather than in globaldata.h so that the action-type constants can be referred
 // to without having access to the global array itself (i.e. it avoids having to include

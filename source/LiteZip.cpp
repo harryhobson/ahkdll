@@ -102,6 +102,13 @@ typedef struct
 	unsigned long	external_fa;		// external file attributes			4 bytes
 	unsigned long	offset;				// Byte offset of local header		4 bytes
 } ZIPENTRYINFO;
+
+typedef struct
+{
+	ULONGLONG		compressed_size;	// compressed size					4 bytes
+	ULONGLONG		uncompressed_size;	// uncompressed size				4 bytes
+	ULONGLONG		offset;				// Byte offset of local header		4 bytes
+} ZIPENTRYINFO64;
 #pragma pack()
 
 
@@ -248,12 +255,12 @@ typedef struct {
 // a single step)
 typedef struct {
 	UCH	*		next_in;	// next input byte
-	DWORD		avail_in;	// # of bytes available at next_in
-	DWORD		total_in;	// total # of input bytes read so far
+	ULONGLONG	avail_in;	// # of bytes available at next_in
+	ULONGLONG	total_in;	// total # of input bytes read so far
 	UCH	*		next_out;	// next output byte should be put there
-	DWORD		avail_out;	// remaining free space at next_out
-	DWORD		total_out;	// total # of bytes output so far
-#ifndef NDEBUG
+	ULONGLONG	avail_out;	// remaining free space at next_out
+	ULONGLONG	total_out;	// total # of bytes output so far
+#ifdef _DEBUG
 	char *		msg;		// last error message, NULL if no error
 #endif
 	INTERNAL_STATE *state;
@@ -269,10 +276,10 @@ typedef struct
 	Z_STREAM	stream;						// structure for inflate()
 	//	DWORD		PosInArchive;				// Current "file position" within the archive
 	ULG			RunningCrc;					// crc32 of all data uncompressed
-	DWORD		RemainingCompressed;		// Remaining number of bytes to be decompressed
-	DWORD		RemainingUncompressed;		// Remaining number of bytes to be obtained after decomp
+	ULONGLONG	RemainingCompressed;		// Remaining number of bytes to be decompressed
+	ULONGLONG	RemainingUncompressed;		// Remaining number of bytes to be obtained after decomp
 	unsigned long Keys[3];					// Decryption keys, initialized by initEntry()
-	DWORD		RemainingEncrypt;			// The first call(s) to readEntry will read this many encryption-header bytes first
+	ULONGLONG	RemainingEncrypt;			// The first call(s) to readEntry will read this many encryption-header bytes first
 	char		CrcEncTest;					// If encrypted, we'll check the encryption buffer against this
 } ENTRYREADVARS;
 
@@ -290,19 +297,20 @@ typedef struct
 	HANDLE			ArchivePtr;					// Points to a handle, or a buffer if TZIP_ARCMEMORY
 	DWORD			LastErr;					// Holds the last TUNZIP error code
 	DWORD			InitialArchiveOffset;		// Initial offset within a file where the ZIP archive begins. This allows reading a ZIP archive contained within another file
-	DWORD			ArchiveBufLen;				// Size of memory buffer
-	DWORD			ArchiveBufPos;				// Current position within "ArchivePtr" if TZIP_ARCMEMORY
-	DWORD			TotalEntries;				// Total number of entries in the current disk of this archive
+	ULONGLONG		ArchiveBufLen;				// Size of memory buffer
+	ULONGLONG		ArchiveBufPos;				// Current position within "ArchivePtr" if TZIP_ARCMEMORY
+	ULONGLONG		TotalEntries;				// Total number of entries in the current disk of this archive
 	DWORD			CommentSize;				// Size of the global comment of the archive
 	DWORD			ByteBeforeZipArchive;		// Byte before the archive, (>0 for sfx)
-	DWORD			CurrentEntryNum;			// Number of the entry (in the archive) that is currently selected for
+	ULONGLONG		CurrentEntryNum;			// Number of the entry (in the archive) that is currently selected for
 	// unzipping. -1 if none.
-	DWORD			CurrEntryPosInCentralDir;	// Position of the current entry's header within the central dir
+	ULONGLONG		CurrEntryPosInCentralDir;	// Position of the current entry's header within the central dir
 	//	DWORD			CentralDirPos;				// Byte offset to the beginning of the central dir
-	DWORD			CentralDirOffset;			// Offset of start of central directory with respect to the starting disk number
+	ULONGLONG		CentralDirOffset;			// Offset of start of central directory with respect to the starting disk number
 	unsigned char	*Password;					// Password, or 0 if none.
 	unsigned char	*OutBuffer;					// Output buffer (where we decompress the current entry when unzipping it).
 	ZIPENTRYINFO	CurrentEntryInfo;			// Info about the currently selected entry (gotten from the Central Dir)
+	ZIPENTRYINFO64	CurrentEntryInfo64;			// Info about the currently selected entry (gotten from the Central Dir)
 	ENTRYREADVARS	EntryReadVars;				// Variables/buffers for decompressing the current entry
 	unsigned char	Rootdir[MAX_PATH];			// Root dir for unzipping entries. Includes a trailing slash. Must be the last field!!!
 } TUNZIP;
@@ -342,7 +350,7 @@ typedef struct
 // ======================== Function Declarations ======================
 
 // Diagnostic functions
-#ifndef NDEBUG
+#ifdef _DEBUG
 #define LuAssert(cond,msg)
 #define LuTrace(x)
 #define LuTracev(x)
@@ -369,7 +377,7 @@ static DWORD setCurrentEntry(TUNZIP *, ZIPENTRY *, DWORD);
 #define UPDATE {UPDBITS UPDIN UPDOUT}
 #define LEAVE {UPDATE return(inflate_flush(s,z,r));}
 //   get bytes and bits 
-#define LOADIN {p = z->next_in; n = z->avail_in; b = s->bitb; k = s->bitk;}
+#define LOADIN {p = (UCH*)z->next_in; n = (uInt)z->avail_in; b = s->bitb; k = s->bitk;}
 #define NEEDBYTE {if (n) r = Z_OK; else LEAVE}
 #define NEXTBYTE (n--, *p++)
 #define NEEDBITS(j) {while(k<(j)){NEEDBYTE;b|=((ULG)NEXTBYTE)<<k;k+=8;}}
@@ -723,7 +731,7 @@ static int inflate_flush(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 
 	// compute number of bytes to copy as far as end of window 
 	n = (uInt)((q <= s->write ? s->write : s->end) - q);
-	if (n > z->avail_out) n = z->avail_out;
+	if (n > (uInt)z->avail_out) n = (uInt)z->avail_out;
 	if (n && r == Z_BUF_ERROR) r = Z_OK;
 
 	// update counters
@@ -750,7 +758,7 @@ static int inflate_flush(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 
 		// compute bytes to copy 
 		n = (uInt)(s->write - q);
-		if (n > z->avail_out) n = z->avail_out;
+		if (n > (uInt)z->avail_out) n = (uInt)z->avail_out;
 		if (n && r == Z_BUF_ERROR) r = Z_OK;
 
 		// update counters 
@@ -792,7 +800,7 @@ static INFLATE_CODES_STATE *inflate_codes_new(uInt bl, uInt bd, const INFLATE_HU
 		c->dbits = (UCH)bd;
 		c->ltree = tl;
 		c->dtree = td;
-#ifndef NDEBUG
+#ifdef _DEBUG
 		LuTracev((stderr, "inflate:       codes new\n"));
 #endif
 	}
@@ -854,7 +862,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				if (e == 0)               // literal 
 				{
 					c->sub.lit = t->base;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, t->base >= 0x20 && t->base < 0x7f ? "inflate:         literal '%c'\n" : "inflate:         literal 0x%02x\n", t->base));
 #endif
 					c->mode = LIT;
@@ -878,7 +886,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 
 				if (e & 32)               // end of block 
 				{
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, "inflate:         end of block\n"));
 #endif
 					c->mode = WASH;
@@ -886,7 +894,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				}
 
 				c->mode = BADCODE;        // invalid code 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid literal/length code";
 #endif
 				r = Z_DATA_ERROR;
@@ -900,7 +908,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				DUMPBITS(j)
 					c->sub.code.need = c->dbits;
 				c->sub.code.tree = c->dtree;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracevv((stderr, "inflate:         length %u\n", c->len));
 #endif
 				c->mode = DIST;
@@ -928,7 +936,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				}
 
 				c->mode = BADCODE;        // invalid code 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid distance code";
 #endif
 				r = Z_DATA_ERROR;
@@ -940,7 +948,7 @@ static int inflate_codes(INFLATE_BLOCKS_STATE *s, Z_STREAM * z, int r)
 				NEEDBITS(j)
 					c->sub.copy.dist += (uInt)b & inflate_mask[j];
 				DUMPBITS(j)
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, "inflate:         distance %u\n", c->sub.copy.dist));
 #endif
 				c->mode = COPY;
@@ -1070,7 +1078,7 @@ static void inflate_blocks_reset(Z_STREAM *z)
 	s->bitk = s->bitb = 0;
 	s->read = s->write = s->window;
 	//	if (!z->state->nowrap) z->adler = s->check = adler32(0, 0, 0);
-#ifndef NDEBUG
+#ifdef _DEBUG
 	LuTracev((stderr, "inflate:   blocks reset\n"));
 #endif
 }
@@ -1110,7 +1118,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 					// Stored
 				case 0:
 				{
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:     stored block%s\n", s->last ? " (last)" : ""));
 #endif
 					DUMPBITS(3)
@@ -1126,7 +1134,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 					uInt bl, bd;
 					const INFLATE_HUFT *tl, *td;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:     fixed codes block%s\n", s->last ? " (last)" : ""));
 #endif
 					bl = Fixed_bl;
@@ -1148,7 +1156,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				// Dynamic
 				case 2:
 				{
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:     dynamic codes block%s\n", s->last ? " (last)" : ""));
 #endif
 					DUMPBITS(3)
@@ -1161,7 +1169,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				{
 					DUMPBITS(3)
 						s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					z->msg = (char*)"invalid block type";
 #endif
 					r = Z_DATA_ERROR;
@@ -1178,7 +1186,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 					if ((((~b) >> 16) & 0xffff) != (b & 0xffff))
 					{
 						s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 						z->msg = (char*)"invalid stored block lengths";
 #endif
 						r = Z_DATA_ERROR;
@@ -1187,7 +1195,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 
 				s->sub.left = (uInt)b & 0xffff;
 				b = k = 0;                      // dump bits 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       stored length %u\n", s->sub.left));
 #endif
 				s->mode = s->sub.left ? IBM_STORED : (s->last ? IBM_DRY : IBM_TYPE);
@@ -1207,7 +1215,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				q += t;  m -= t;
 				if ((s->sub.left -= t) != 0)
 					break;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       stored end, %lu total out\n", z->total_out + (q >= s->read ? q - s->read : (s->end - s->read) + (q - s->window))));
 #endif
 				s->mode = s->last ? IBM_DRY : IBM_TYPE;
@@ -1222,7 +1230,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				if ((t & 0x1f) > 29 || ((t >> 5) & 0x1f) > 29)
 				{
 					s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					z->msg = (char*)"too many length or distance symbols";
 #endif
 					r = Z_DATA_ERROR;
@@ -1239,7 +1247,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 
 				DUMPBITS(14)
 					s->sub.trees.index = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       table sizes ok\n"));
 #endif
 				s->mode = IBM_BTREE;
@@ -1271,7 +1279,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				}
 
 				s->sub.trees.index = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracev((stderr, "inflate:       bits tree ok\n"));
 #endif
 				s->mode = IBM_DTREE;
@@ -1308,7 +1316,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 						{
 							GlobalFree(s->sub.trees.blens);
 							s->mode = IBM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 							z->msg = (char*)"invalid bit length repeat";
 #endif
 							r = Z_DATA_ERROR;
@@ -1344,7 +1352,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 						r = t;
 						LEAVE
 					}
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:       trees ok\n"));
 #endif
 					if ((c = inflate_codes_new(bl, bd, tl, td, z)) == 0)
@@ -1367,7 +1375,7 @@ static int inflate_blocks(Z_STREAM * z, int r)
 				r = Z_OK;
 				GlobalFree(s->sub.decode.codes);
 				LOAD
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracev((stderr, "inflate:       codes end, %lu total out\n", z->total_out + (q >= s->read ? q - s->read : (s->end - s->read) + (q - s->window))));
 #endif
 				if (!s->last)
@@ -1675,7 +1683,7 @@ static int inflate_trees_bits(uInt *c, uInt *bb, INFLATE_HUFT * *tb, INFLATE_HUF
 
 	hn = 0;
 	r = huft_build(c, 19, 19, 0, 0, tb, bb, hp, &hn, v);
-#ifndef NDEBUG
+#ifdef _DEBUG
 	if (r == Z_DATA_ERROR)
 		z->msg = (char*)"oversubscribed dynamic bit lengths tree";
 	else if (r == Z_BUF_ERROR || *bb == 0)
@@ -1719,7 +1727,7 @@ static int inflate_trees_dynamic(
 	r = huft_build(c, nl, 257, CpLens, CpLExt, tl, bl, hp, &hn, v);
 	if (r != Z_OK || *bl == 0)
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		if (r == Z_DATA_ERROR)
 			z->msg = (char *)"oversubscribed literal/length tree";
 		else if (r != Z_MEM_ERROR)
@@ -1737,7 +1745,7 @@ static int inflate_trees_dynamic(
 	r = huft_build(c + nl, nd, 0, CpDist, CpDExt, td, bd, hp, &hn, v);
 	if (r != Z_OK || (*bd == 0 && nl > 257))
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		if (r == Z_DATA_ERROR)
 			z->msg = (char*)"oversubscribed distance tree";
 		else if (r == Z_BUF_ERROR)
@@ -1776,7 +1784,7 @@ static int inflate_trees_dynamic(
 
 // macros for bit input with no checking and for returning unused bytes 
 #define GRABBITS(j) {while(k<(j)){b|=((ULG)NEXTBYTE)<<k;k+=8;}}
-#define UNGRAB {c=z->avail_in-n;c=(k>>3)<c?k>>3:c;n+=c;p-=c;k-=c<<3;}
+#define UNGRAB {c=(uInt)z->avail_in-n;c=(k>>3)<c?k>>3:c;n+=c;p-=c;k-=c<<3;}
 
 // Called with number of bytes left to write in window at least 258
 // (the maximum string length) and number of input bytes available
@@ -1814,7 +1822,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 			if ((e = (t = tl + ((uInt)b & ml))->word.what.Exop) == 0)
 			{
 				DUMPBITS(t->word.what.Bits)
-#ifndef NDEBUG
+#ifdef _DEBUG
 					LuTracevv((stderr, t->base >= 0x20 && t->base < 0x7f ? "inflate:         * literal '%c'\n" : "inflate:         * literal 0x%02x\n", t->base));
 #endif
 				*q++ = (UCH)t->base;
@@ -1831,7 +1839,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 					e &= 15;
 					c = t->base + ((uInt)b & inflate_mask[e]);
 					DUMPBITS(e)
-#ifndef NDEBUG
+#ifdef _DEBUG
 						LuTracevv((stderr, "inflate:         * length %u\n", c));
 #endif
 					// decode distance base of block to copy 
@@ -1847,7 +1855,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 								GRABBITS(e)         // get extra bits (up to 13) 
 									d = t->base + ((uInt)b & inflate_mask[e]);
 								DUMPBITS(e)
-#ifndef NDEBUG
+#ifdef _DEBUG
 									LuTracevv((stderr, "inflate:         * distance %u\n", d));
 #endif
 								// do the copy
@@ -1902,7 +1910,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 							}
 							else
 							{
-#ifndef NDEBUG
+#ifdef _DEBUG
 								z->msg = (char*)"invalid distance code";
 #endif
 								UNGRAB
@@ -1920,7 +1928,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 				if ((e = (t += ((uInt)b & inflate_mask[e]))->word.what.Exop) == 0)
 				{
 					DUMPBITS(t->word.what.Bits)
-#ifndef NDEBUG
+#ifdef _DEBUG
 						LuTracevv((stderr, t->base >= 0x20 && t->base < 0x7f ? "inflate:         * literal '%c'\n" : "inflate:         * literal 0x%02x\n", t->base));
 #endif
 					*q++ = (UCH)t->base;
@@ -1930,7 +1938,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 			}
 			else if (e & 32)
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				LuTracevv((stderr, "inflate:         * end of block\n"));
 #endif
 				UNGRAB
@@ -1939,7 +1947,7 @@ static int inflate_fast(uInt bl, uInt bd, const INFLATE_HUFT *tl, const INFLATE_
 			}
 			else
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid literal/length code";
 #endif
 				UNGRAB
@@ -2168,7 +2176,7 @@ static int inflate(Z_STREAM * z, int f)
 				if (((z->state->sub.method = IM_NEXTBYTE) & 0xf) != Z_DEFLATED)
 				{
 					z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 					z->msg = (char*)"unknown compression method";
 #endif
 					z->state->sub.marker = 5;       // can't try inflateSync
@@ -2178,7 +2186,7 @@ static int inflate(Z_STREAM * z, int f)
 			if ((z->state->sub.method >> 4) + 8 > z->state->wbits)
 			{
 				z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"invalid window size";
 #endif
 				z->state->sub.marker = 5;       // can't try inflateSync
@@ -2194,13 +2202,13 @@ static int inflate(Z_STREAM * z, int f)
 			if (((z->state->sub.method << 8) + b) % 31)
 			{
 				z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"incorrect header check";
 #endif
 				z->state->sub.marker = 5;       // can't try inflateSync 
 				break;
 			}
-#ifndef NDEBUG
+#ifdef _DEBUG
 			LuTracev((stderr, "inflate: zlib header ok\n"));
 #endif
 			if (!(b & PRESET_DICT))
@@ -2244,7 +2252,7 @@ static int inflate(Z_STREAM * z, int f)
 		case IM_DICT0:
 		{
 			z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 			z->msg = (char*)"need dictionary";
 #endif
 			z->state->sub.marker = 0;       // can try inflateSync 
@@ -2303,14 +2311,14 @@ static int inflate(Z_STREAM * z, int f)
 			if (z->state->sub.check.was != z->state->sub.check.need)
 			{
 				z->state->mode = IM_BAD;
-#ifndef NDEBUG
+#ifdef _DEBUG
 				z->msg = (char*)"incorrect data check";
 #endif
 				z->state->sub.marker = 5;       // can't try inflateSync 
 				break;
 			}
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 			LuTracev((stderr, "inflate: zlib check ok\n"));
 #endif
 			z->state->mode = IM_DONE;
@@ -2336,14 +2344,27 @@ static int inflate(Z_STREAM * z, int f)
 * Sets the current "file position" within the ZIP archive.
 */
 
-static int seekInZip(TUNZIP *tunzip, long offset, DWORD reference)
+static int seekInZip(TUNZIP *tunzip, LONGLONG offset, DWORD reference)
 {
 	if (!(tunzip->Flags & TZIP_ARCMEMORY))
 	{
-		if (reference == FILE_BEGIN) offset = SetFilePointer(tunzip->ArchivePtr, tunzip->InitialArchiveOffset + offset, 0, FILE_BEGIN);
-		else if (reference == FILE_CURRENT) offset = SetFilePointer(tunzip->ArchivePtr, offset, 0, FILE_CURRENT);
+		LARGE_INTEGER aPointer;
+		if (reference == FILE_BEGIN)
+		{
+			aPointer.QuadPart = tunzip->InitialArchiveOffset + offset;
+			if (!SetFilePointerEx(tunzip->ArchivePtr, aPointer, &aPointer, FILE_BEGIN))
+				return(ZR_SEEK);
+			offset = aPointer.QuadPart;
+		}
+		else if (reference == FILE_CURRENT)
+		{
+			aPointer.QuadPart = offset;
+			if (!SetFilePointerEx(tunzip->ArchivePtr, aPointer, &aPointer, FILE_CURRENT))
+				return(ZR_SEEK);
+			offset = aPointer.QuadPart;
+		}
 		//		else if (reference == FILE_END) offset = SetFilePointer(tunzip->ArchivePtr, offset, 0, FILE_END);
-		if (offset == -1) return(ZR_SEEK);
+		//		if (offset == -1) return(ZR_SEEK);
 	}
 	else
 	{
@@ -2387,7 +2408,7 @@ static DWORD readFromZip(TUNZIP *tunzip, void *ptr, DWORD toread)
 	}
 
 	// Reading from memory
-	if (tunzip->ArchiveBufPos + toread > tunzip->ArchiveBufLen) toread = tunzip->ArchiveBufLen - tunzip->ArchiveBufPos;
+	if (tunzip->ArchiveBufPos + toread > tunzip->ArchiveBufLen) toread = (DWORD)(tunzip->ArchiveBufLen - tunzip->ArchiveBufPos);
 	CopyMemory(ptr, (unsigned char *)tunzip->ArchivePtr + tunzip->ArchiveBufPos, toread);
 	tunzip->ArchiveBufPos += toread;
 	return(toread);
@@ -2428,6 +2449,23 @@ static ULG getArchiveLong(TUNZIP *tunzip)
 	x = 0;
 	if (!tunzip->LastErr && readFromZip(tunzip, &x, sizeof(ULG)))
 		reformat_long((unsigned char *)&x);
+	return(x);
+}
+
+
+static unsigned char * reformat_longlong(unsigned char *ptr)
+{
+	*(ULONGLONG *)ptr = ((ULONGLONG)*ptr) | (((ULONGLONG)*(ptr + 1)) << 8) | (((ULONGLONG)*(ptr + 2)) << 16) | (((ULONGLONG)*(ptr + 3)) << 24) | (((ULONGLONG)*(ptr + 4)) << 32) | (((ULONGLONG)*(ptr + 5)) << 40) | (((ULONGLONG)*(ptr + 6)) << 48) | (((ULONGLONG)*(ptr + 7)) << 56);
+	return (unsigned char *)((ULONGLONG *)ptr + 1);
+}
+// Reads a longlong in LSB order from the given file
+static ULONGLONG getArchiveLongLong(TUNZIP *tunzip)
+{
+	ULONGLONG	x;
+
+	x = 0;
+	if (!tunzip->LastErr && readFromZip(tunzip, &x, sizeof(ULONGLONG)))
+		reformat_longlong((unsigned char *)&x);
 	return(x);
 }
 
@@ -2540,8 +2578,8 @@ static void getEntryFN(TUNZIP *tunzip, char *szFileName)
 
 static void getEntryInfo(register TUNZIP *tunzip)
 {
-	DWORD			uSizeRead;
-	DWORD			lSeek;
+	ULONGLONG		uSizeRead;
+	DWORD		lSeek;
 
 	// Seek to the start of this entry's info in the Central Directory
 	if (!seekInZip(tunzip, tunzip->CurrEntryPosInCentralDir + tunzip->ByteBeforeZipArchive, FILE_BEGIN))
@@ -2555,7 +2593,7 @@ static void getEntryInfo(register TUNZIP *tunzip)
 			if (tunzip->Flags & TZIP_RAW)
 			{
 				tunzip->CurrentEntryInfo.compression_method = Z_DEFLATED;
-				tunzip->CurrentEntryInfo.offset = tunzip->CurrEntryPosInCentralDir + tunzip->ByteBeforeZipArchive;
+				tunzip->CurrentEntryInfo.offset = (DWORD)(tunzip->CurrEntryPosInCentralDir + tunzip->ByteBeforeZipArchive);
 				goto out;
 			}
 
@@ -2570,7 +2608,12 @@ static void getEntryInfo(register TUNZIP *tunzip)
 
 			// Save offset to filename
 			if (!(tunzip->Flags & TZIP_ARCMEMORY))
-				uSizeRead = SetFilePointer(tunzip->ArchivePtr, 0, 0, FILE_CURRENT);
+			{
+				LARGE_INTEGER aOffset;
+				aOffset.QuadPart = 0;
+				SetFilePointerEx(tunzip->ArchivePtr, aOffset, &aOffset, FILE_CURRENT);
+				uSizeRead = aOffset.QuadPart;
+			}
 			else
 				uSizeRead = tunzip->ArchiveBufPos;
 
@@ -2609,8 +2652,8 @@ static void getEntryInfo(register TUNZIP *tunzip)
 			}
 			else
 			{
-				tunzip->CurrentEntryInfo.offset = tunzip->ArchiveBufPos;
-				tunzip->CurrentEntryInfo.compressed_size = tunzip->ArchiveBufLen - tunzip->ArchiveBufPos - 8;
+				tunzip->CurrentEntryInfo.offset = (DWORD)tunzip->ArchiveBufPos;
+				tunzip->CurrentEntryInfo.compressed_size = (DWORD)(tunzip->ArchiveBufLen - tunzip->ArchiveBufPos - 8);
 				CopyMemory((void *)&tunzip->CurrentEntryInfo.crc, (unsigned char *)tunzip->ArchivePtr + tunzip->ArchiveBufLen - 8, 4);
 				reformat_long((unsigned char *)&tunzip->CurrentEntryInfo.crc);
 				CopyMemory((void *)&tunzip->CurrentEntryInfo.uncompressed_size, (unsigned char *)tunzip->ArchivePtr + tunzip->ArchiveBufLen - 4, 4);
@@ -2621,10 +2664,10 @@ static void getEntryInfo(register TUNZIP *tunzip)
 			seekInZip(tunzip, uSizeRead, FILE_BEGIN);
 			goto out;
 		}
-
+		DWORD aSizeRead;
 		// Get the ZIP signature and check it
-		uSizeRead = getArchiveLong(tunzip);
-		if (uSizeRead == 0x02014b50 &&
+		aSizeRead = getArchiveLong(tunzip);
+		if (aSizeRead == 0x02014b50 &&
 
 			// Read in the ZIPENTRYINFO
 			readFromZip(tunzip, &tunzip->CurrentEntryInfo, sizeof(ZIPENTRYINFO)) == sizeof(ZIPENTRYINFO))
@@ -2632,13 +2675,13 @@ static void getEntryInfo(register TUNZIP *tunzip)
 			unsigned char	*ptr;
 
 			// Adjust the various fields to this CPU's byte order
-			uSizeRead = ZIP_FIELDS_REFORMAT;
+			aSizeRead = ZIP_FIELDS_REFORMAT;
 			ptr = (unsigned char *)&tunzip->CurrentEntryInfo;
 			for (lSeek = 0; lSeek < NUM_FIELDS_REFORMAT; lSeek++)
 			{
-				if (0x00000001 & uSizeRead) ptr = reformat_long(ptr);
+				if (0x00000001 & aSizeRead) ptr = reformat_long(ptr);
 				else ptr = reformat_short(ptr);
-				uSizeRead >>= 1;
+				aSizeRead >>= 1;
 			}
 
 		out:		return;
@@ -2712,7 +2755,7 @@ static void inflateEnd(register ENTRYREADVARS *entryReadVars)
 		case IBM_DTREE:
 			if ((ptr = entryReadVars->stream.state->blocks.sub.trees.blens))
 			{
-				SecureZeroMemory(ptr, GlobalSize(ptr));
+				g_memset(ptr, 0, GlobalSize(ptr));
 				GlobalFree(ptr);
 			}
 			break;
@@ -2720,25 +2763,25 @@ static void inflateEnd(register ENTRYREADVARS *entryReadVars)
 		case IBM_CODES:
 			if ((ptr = entryReadVars->stream.state->blocks.sub.decode.codes))
 			{
-				SecureZeroMemory(ptr, GlobalSize(ptr));
+				g_memset(ptr, 0, GlobalSize(ptr));
 				GlobalFree(ptr);
 			}
 		}
 
 		if ((ptr = entryReadVars->stream.state->blocks.window))
 		{
-			SecureZeroMemory(ptr, GlobalSize(ptr));
+			g_memset(ptr, 0, GlobalSize(ptr));
 			GlobalFree(ptr);
 		}
 		if ((ptr = entryReadVars->stream.state->blocks.hufts))
 		{
-			SecureZeroMemory(ptr, GlobalSize(ptr));
+			g_memset(ptr, 0, GlobalSize(ptr));
 			GlobalFree(ptr);
 		}
-		SecureZeroMemory(entryReadVars->stream.state, GlobalSize(entryReadVars->stream.state));
+		g_memset(entryReadVars->stream.state, 0, GlobalSize(entryReadVars->stream.state));
 		GlobalFree(entryReadVars->stream.state);
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		LuTracev((stderr, "inflate: freed\n"));
 #endif
 	}
@@ -2759,7 +2802,7 @@ static void cleanupEntry(register TUNZIP * tunzip)
 	// Free the input buffer
 	if (tunzip->EntryReadVars.InputBuffer)
 	{
-		SecureZeroMemory(tunzip->EntryReadVars.InputBuffer, GlobalSize(tunzip->EntryReadVars.InputBuffer));
+		g_memset(tunzip->EntryReadVars.InputBuffer, 0, GlobalSize(tunzip->EntryReadVars.InputBuffer));
 		GlobalFree(tunzip->EntryReadVars.InputBuffer);
 	}
 	tunzip->EntryReadVars.InputBuffer = 0;
@@ -2769,7 +2812,7 @@ static void cleanupEntry(register TUNZIP * tunzip)
 	tunzip->EntryReadVars.stream.state = 0;
 
 	// No currently selected entry
-	tunzip->CurrentEntryNum = (DWORD)-1;
+	tunzip->CurrentEntryNum = (ULONGLONG)-1;
 }
 
 
@@ -2786,7 +2829,7 @@ static void cleanupEntry(register TUNZIP * tunzip)
 
 static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 {
-	register DWORD	offset;
+	register ULONGLONG	offset;
 
 	// Clear out the ENTRYREADVARS struct
 	ZeroMemory(&tunzip->EntryReadVars, sizeof(ENTRYREADVARS));
@@ -2822,7 +2865,7 @@ static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 		tunzip->EntryReadVars.stream.state->blocks.end = tunzip->EntryReadVars.stream.state->blocks.window + (1 << 15);
 		tunzip->EntryReadVars.stream.state->blocks.read = tunzip->EntryReadVars.stream.state->blocks.write = tunzip->EntryReadVars.stream.state->blocks.window;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		LuTracev((stderr, "inflate: allocated\n"));
 #endif
 	}
@@ -2830,20 +2873,22 @@ static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 	// If raw mode, app must supply the compressed and uncompressed sizes
 	if (tunzip->Flags & TZIP_RAW)
 	{
-		tunzip->CurrentEntryInfo.compressed_size = ze->CompressedSize;
-		tunzip->CurrentEntryInfo.uncompressed_size = ze->UncompressedSize;
+		tunzip->CurrentEntryInfo.compressed_size = (DWORD)ze->CompressedSize;
+		tunzip->CurrentEntryInfo.uncompressed_size = (DWORD)ze->UncompressedSize;
+		tunzip->CurrentEntryInfo64.compressed_size = ze->CompressedSize;
+		tunzip->CurrentEntryInfo64.uncompressed_size = ze->UncompressedSize;
 	}
 
 	// Initialize running counts
-	tunzip->EntryReadVars.RemainingCompressed = tunzip->CurrentEntryInfo.compressed_size;
-	tunzip->EntryReadVars.RemainingUncompressed = tunzip->CurrentEntryInfo.uncompressed_size;
+	tunzip->EntryReadVars.RemainingCompressed = tunzip->CurrentEntryInfo64.compressed_size;
+	tunzip->EntryReadVars.RemainingUncompressed = tunzip->CurrentEntryInfo64.uncompressed_size;
 
 	// Initialize for CRC checksum
 	if (tunzip->CurrentEntryInfo.flag & 8) tunzip->EntryReadVars.CrcEncTest = (char)((tunzip->CurrentEntryInfo.dosDate >> 8) & 0xff);
 	else tunzip->EntryReadVars.CrcEncTest = (char)(tunzip->CurrentEntryInfo.crc >> 24);
 
 	if (tunzip->Flags & TZIP_GZIP)
-		offset = tunzip->CurrentEntryInfo.offset;
+		offset = tunzip->CurrentEntryInfo64.offset;
 	else
 	{
 		{
@@ -2868,7 +2913,7 @@ static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 			unsigned short	extra_offset;
 
 			// Seek to the entry's LOCALHEADER->extra_field_size
-			if (seekInZip(tunzip, tunzip->CurrentEntryInfo.offset + tunzip->ByteBeforeZipArchive + 28, FILE_BEGIN) ||
+			if (seekInZip(tunzip, tunzip->CurrentEntryInfo64.offset + tunzip->ByteBeforeZipArchive + 28, FILE_BEGIN) ||
 				!readFromZip(tunzip, &extra_offset, sizeof(unsigned short)))
 			{
 			badseek:	tunzip->LastErr = ZR_READ;
@@ -2877,7 +2922,7 @@ static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 
 			// Get the offset to where the entry's compressed data starts within the archive
 			//		tunzip->EntryReadVars.PosInArchive = (DWORD)tunzip->CurrentEntryInfo.offset + SIZEZIPLOCALHEADER + (DWORD)tunzip->CurrentEntryInfo.size_filename + (DWORD)extra_offset;
-			offset = (DWORD)tunzip->CurrentEntryInfo.offset + SIZEZIPLOCALHEADER + (DWORD)tunzip->CurrentEntryInfo.size_filename + (DWORD)extra_offset;
+			offset = (DWORD)tunzip->CurrentEntryInfo64.offset + SIZEZIPLOCALHEADER + (DWORD)tunzip->CurrentEntryInfo.size_filename + (DWORD)extra_offset;
 		}
 	}
 
@@ -2904,10 +2949,10 @@ static void initEntry(register TUNZIP *tunzip, ZIPENTRY *ze)
 * error.
 */
 
-DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
+ULONGLONG readEntry(register TUNZIP *tunzip, void *buf, ULONGLONG len)
 {
 	int							err;
-	DWORD						iRead;
+	ULONGLONG					iRead;
 
 	iRead = 0;
 	tunzip->EntryReadVars.stream.next_out = (UCH *)buf;
@@ -2923,7 +2968,7 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 		// Input buffer is empty? Fill it
 		if (!tunzip->EntryReadVars.stream.avail_in && tunzip->EntryReadVars.RemainingCompressed)
 		{
-			DWORD	uReadThis;
+			ULONGLONG	uReadThis;
 
 			// Fill up the input buffer, or read as much as is available
 			uReadThis = UNZ_BUFSIZE;
@@ -2939,7 +2984,7 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 			}
 
 			// Seek to where we last left off in the ZIP archive and fill the input buffer
-			if (!readFromZip(tunzip, tunzip->EntryReadVars.InputBuffer, uReadThis))
+			if (!readFromZip(tunzip, tunzip->EntryReadVars.InputBuffer, (DWORD)uReadThis))
 				//			if (seekInZip(tunzip, tunzip->EntryReadVars.PosInArchive + tunzip->ByteBeforeZipArchive, FILE_BEGIN) ||
 				//				!readFromZip(tunzip, tunzip->EntryReadVars.InputBuffer, uReadThis))
 			{
@@ -2974,7 +3019,7 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 
 		// Read the encrpytion header that is at the start of the entry, if we haven't already done so
 		{
-			register DWORD	uDoEncHead;
+			register ULONGLONG	uDoEncHead;
 
 			uDoEncHead = tunzip->EntryReadVars.RemainingEncrypt;
 			if (uDoEncHead > tunzip->EntryReadVars.stream.avail_in) uDoEncHead = tunzip->EntryReadVars.stream.avail_in;
@@ -3000,15 +3045,15 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 		// STORE?
 		if (!tunzip->CurrentEntryInfo.compression_method)
 		{
-			DWORD	uDoCopy;
+			ULONGLONG	uDoCopy;
 
 			if (tunzip->EntryReadVars.stream.avail_out < tunzip->EntryReadVars.stream.avail_in)
 				uDoCopy = tunzip->EntryReadVars.stream.avail_out;
 			else
 				uDoCopy = tunzip->EntryReadVars.stream.avail_in;
-			CopyMemory(tunzip->EntryReadVars.stream.next_out, tunzip->EntryReadVars.stream.next_in, uDoCopy);
+			CopyMemory(tunzip->EntryReadVars.stream.next_out, tunzip->EntryReadVars.stream.next_in, (DWORD)uDoCopy & 0xFFFFFFFF);
 
-			tunzip->EntryReadVars.RunningCrc = ucrc32(tunzip->EntryReadVars.RunningCrc, tunzip->EntryReadVars.stream.next_out, uDoCopy);
+			tunzip->EntryReadVars.RunningCrc = ucrc32(tunzip->EntryReadVars.RunningCrc, tunzip->EntryReadVars.stream.next_out, (DWORD)uDoCopy & 0xFFFFFFFF);
 			tunzip->EntryReadVars.RemainingUncompressed -= uDoCopy;
 			tunzip->EntryReadVars.stream.avail_in -= uDoCopy;
 			tunzip->EntryReadVars.stream.avail_out -= uDoCopy;
@@ -3023,9 +3068,9 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 		// DEFLATE
 		else
 		{
-			DWORD		uTotalOutBefore, uTotalOutAfter;
+			ULONGLONG	uTotalOutBefore, uTotalOutAfter;
 			const UCH	*bufBefore;
-			DWORD		uOutThis;
+			ULONGLONG		uOutThis;
 
 			uTotalOutBefore = tunzip->EntryReadVars.stream.total_out;
 			bufBefore = tunzip->EntryReadVars.stream.next_out;
@@ -3039,7 +3084,7 @@ DWORD readEntry(register TUNZIP *tunzip, void *buf, DWORD len)
 			uTotalOutAfter = tunzip->EntryReadVars.stream.total_out;
 			uOutThis = uTotalOutAfter - uTotalOutBefore;
 
-			tunzip->EntryReadVars.RunningCrc = ucrc32(tunzip->EntryReadVars.RunningCrc, bufBefore, uOutThis);
+			tunzip->EntryReadVars.RunningCrc = ucrc32(tunzip->EntryReadVars.RunningCrc, bufBefore, (DWORD)uOutThis);
 
 			tunzip->EntryReadVars.RemainingUncompressed -= uOutThis;
 			iRead += (uTotalOutAfter - uTotalOutBefore);
@@ -3241,7 +3286,7 @@ static DWORD setCurrentEntry(register TUNZIP *tunzip, ZIPENTRY *ze, DWORD flags)
 	if (!(flags & UNZIP_ALREADYINIT))
 	{
 		// Does caller want general information about the ZIP archive?
-		if (ze->Index == (DWORD)-1)
+		if (ze->Index == (ULONGLONG)-1)
 		{
 			ze->Index = tunzip->TotalEntries;
 			goto good;
@@ -3373,6 +3418,7 @@ static DWORD setCurrentEntry(register TUNZIP *tunzip, ZIPENTRY *ze, DWORD flags)
 		// Copy sizes
 		ze->CompressedSize = tunzip->CurrentEntryInfo.compressed_size;
 		ze->UncompressedSize = tunzip->CurrentEntryInfo.uncompressed_size;
+		ze->offset = tunzip->CurrentEntryInfo.offset;
 
 		// Copy timestamp
 		{
@@ -3429,7 +3475,23 @@ static DWORD setCurrentEntry(register TUNZIP *tunzip, ZIPENTRY *ze, DWORD flags)
 
 					break;
 				}
-
+				else if (*(SHORT*)etype == 1 && size)
+				{
+					DWORD apos = epos + 4;
+					if (tunzip->CurrentEntryInfo.compressed_size == -1)
+					{
+						ze->CompressedSize = *(ULONGLONG*)&extra[apos];
+						apos += 8;
+					}
+					if (tunzip->CurrentEntryInfo.uncompressed_size == -1)
+					{
+						ze->UncompressedSize = *(ULONGLONG*)&extra[apos];
+						apos += 8;
+					}
+					if (tunzip->CurrentEntryInfo.offset == -1)
+						ze->offset = *(ULONGLONG*)&extra[apos];
+				}
+				
 				epos += 4 + size;
 			}
 		}
@@ -3440,6 +3502,9 @@ good2:
 	// We clear the internal_fa field as a signal to unzipEntry() that a memory-buffer unzip is
 	// starting for the first time
 	tunzip->CurrentEntryInfo.internal_fa = 0;
+	tunzip->CurrentEntryInfo64.compressed_size = ze->CompressedSize;
+	tunzip->CurrentEntryInfo64.uncompressed_size = ze->UncompressedSize;
+	tunzip->CurrentEntryInfo64.offset = ze->offset;
 good:
 	return(ZR_OK);
 }
@@ -3633,7 +3698,7 @@ static DWORD unzipEntry(register TUNZIP *tunzip, void *dst, ZIPENTRY *ze, DWORD 
 	// Make sure TUNZIP if valid
 	if (IsBadReadPtr(tunzip, 1) ||
 		// Make sure we have a currently selected entry
-		tunzip->CurrentEntryNum == (DWORD)-1)
+		tunzip->CurrentEntryNum == (ULONGLONG)-1)
 	{
 		return(ZR_ARGS);
 	}
@@ -3711,10 +3776,10 @@ static DWORD unzipEntry(register TUNZIP *tunzip, void *dst, ZIPENTRY *ze, DWORD 
 			while (!tunzip->LastErr)
 			{
 				DWORD				writ;
-				register DWORD read;
+				register DWORD		read;
 
 				// Decompress the bytes into the input buffer. If EOF, then get out of this loop
-				if (!(read = readEntry(tunzip, tunzip->OutBuffer, 16384))) break;
+				if (!(read = (DWORD)readEntry(tunzip, tunzip->OutBuffer, 16384))) break;
 
 				// Write the bytes
 				if (!WriteFile(h, tunzip->OutBuffer, read, &writ, 0) || writ != read)
@@ -3794,14 +3859,14 @@ static void closeArchive(register TUNZIP *tunzip)
 	if (tunzip->Flags & TZIP_ARCCLOSEFH)
 		CloseHandle(tunzip->ArchivePtr);
 	if (tunzip->Password){
-		SecureZeroMemory(tunzip->Password, GlobalSize(tunzip->Password));
+		g_memset(tunzip->Password, 0, GlobalSize(tunzip->Password));
 		GlobalFree(tunzip->Password);
 	}
 	if (tunzip->OutBuffer){
-		SecureZeroMemory(tunzip->OutBuffer, GlobalSize(tunzip->OutBuffer));
+		g_memset(tunzip->OutBuffer, 0, GlobalSize(tunzip->OutBuffer));
 		GlobalFree(tunzip->OutBuffer);
 	}
-	SecureZeroMemory(tunzip, GlobalSize(tunzip));
+	g_memset(tunzip, 0, GlobalSize(tunzip));
 	GlobalFree(tunzip);
 }
 
@@ -3881,7 +3946,8 @@ DWORD WINAPI UnzipFindItemW(HUNZIP tunzip, ZIPENTRY *ze, BOOL ic)
 static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const char *pwd)
 {
 	register TUNZIP		*tunzip;
-	DWORD				centralDirPos;
+	ULONGLONG			centralDirPos;
+	bool				iszip64 = false;
 
 	// Get a TUNZIP
 	if (!(tunzip = (TUNZIP *)GlobalAlloc(GMEM_FIXED, sizeof(TUNZIP))))
@@ -3904,7 +3970,7 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 	}
 
 	// No currently selected entry
-	tunzip->CurrentEntryNum = (DWORD)-1;
+	tunzip->CurrentEntryNum = (ULONGLONG)-1;
 
 	switch (flags & ~(UNZIP_UNICODE | UNZIP_ALREADYINIT | UNZIP_RAW))
 	{
@@ -3920,9 +3986,9 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 	case UNZIP_FILENAME:
 	{
 		if (flags & UNZIP_UNICODE)
-			tunzip->ArchivePtr = CreateFileW((const WCHAR *)z, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			tunzip->ArchivePtr = CreateFileW((const WCHAR *)z, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 		else
-			tunzip->ArchivePtr = CreateFileA((const char *)z, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			tunzip->ArchivePtr = CreateFileA((const char *)z, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 		if (tunzip->ArchivePtr == INVALID_HANDLE_VALUE)
 		{
 			flags = ZR_NOFILE;
@@ -3992,6 +4058,7 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 		ZeroMemory(&tunzip->CurrentEntryInfo, sizeof(ZIPENTRYINFO));
 		tunzip->CurrentEntryInfo.compression_method = Z_DEFLATED;
 		tunzip->CurrentEntryInfo.offset = tunzip->InitialArchiveOffset;
+		tunzip->CurrentEntryInfo64.offset = tunzip->InitialArchiveOffset;
 		tunzip->Flags |= TZIP_RAW;
 		tunzip->CurrentEntryNum = 0;
 		goto raw;
@@ -3999,13 +4066,18 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 
 	{
 		// Find the central directory's offset within the archive
-		DWORD			uMaxBack;
-		DWORD			uSizeFile;
-		DWORD			uBackRead;
+		LONGLONG	uMaxBack;
+		LONGLONG	uSizeFile;
+		LONGLONG	uBackRead;
 		unsigned char	*buf;
 
 		if (!(tunzip->Flags & TZIP_ARCMEMORY))
-			uSizeFile = SetFilePointer(tunzip->ArchivePtr, 0, 0, FILE_END) - tunzip->InitialArchiveOffset;
+		{
+			LARGE_INTEGER aSizeFile;
+			aSizeFile.QuadPart = 0;
+			SetFilePointerEx(tunzip->ArchivePtr, aSizeFile, &aSizeFile, FILE_END);
+			uSizeFile = aSizeFile.QuadPart - tunzip->InitialArchiveOffset; // SetFilePointer(tunzip->ArchivePtr, 0, 0, FILE_END) - tunzip->InitialArchiveOffset;
+		}
 		else
 			uSizeFile = tunzip->ArchiveBufPos = tunzip->ArchiveBufLen;
 
@@ -4023,14 +4095,22 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 				if (uBackRead + BUFREADCOMMENT > uMaxBack) uBackRead = uMaxBack;
 				else uBackRead += BUFREADCOMMENT;
 				centralDirPos = uSizeFile - uBackRead;
-				uReadSize = ((BUFREADCOMMENT + 4) < (uSizeFile - centralDirPos)) ? (BUFREADCOMMENT + 4) : (uSizeFile - centralDirPos);
+				uReadSize = (DWORD)(((BUFREADCOMMENT + 4) < (uSizeFile - centralDirPos)) ? (BUFREADCOMMENT + 4) : (uSizeFile - centralDirPos));
 				if (seekInZip(tunzip, centralDirPos, FILE_BEGIN) || !readFromZip(tunzip, buf, uReadSize)) break;
 				for (i = (int)uReadSize - 3; (i--) >= 0;)
 				{
 					if (*(buf + i) == 0x50 && *(buf + i + 1) == 0x4b && *(buf + i + 2) == 0x05 && *(buf + i + 3) == 0x06)
 					{
+						if (*(buf + i - 20) == 0x50 && *(buf + i + 1 - 20) == 0x4b && *(buf + i + 2 - 20) == 0x06 && *(buf + i + 3 - 20) == 0x07)
+						{
+							iszip64 = true;
+							centralDirPos = *(ULONGLONG*)(buf + i - 12);
+						}
+						else
+						{
+							centralDirPos += i;
+						}
 						GlobalFree(buf);
-						centralDirPos += i;
 						seekInZip(tunzip, centralDirPos, FILE_BEGIN);
 						goto gotdir;
 					}
@@ -4050,10 +4130,10 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 	}
 
 	{
-		unsigned short	number_disk;			// # of the current dist, used for spanning ZIP, unsupported here
-		unsigned short	number_disk_with_CD;	// # of the disk with central dir, used for spanning ZIP, unsupported here
-		unsigned short	totalEntries_CD;		// total number of entries in the central dir (same as TotalEntries on nospan)
-		DWORD			centralDirSize;
+		unsigned int	number_disk;			// # of the current dist, used for spanning ZIP, unsupported here
+		unsigned int	number_disk_with_CD;	// # of the disk with central dir, used for spanning ZIP, unsupported here
+		ULONGLONG		totalEntries_CD;		// total number of entries in the central dir (same as TotalEntries on nospan)
+		ULONGLONG		centralDirSize;
 
 		// Assume GZIP format (ie, no central dir because there is only 1 file)
 		seekInZip(tunzip, 0, FILE_BEGIN);
@@ -4074,18 +4154,35 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 	gotdir:
 		// Get/skip the signature, already checked above
 		getArchiveLong(tunzip);
-
+		ULONGLONG size_of_zip64 = 0;
+		if (iszip64)
+		{
+			size_of_zip64 = getArchiveLongLong(tunzip);
+			getArchiveLong(tunzip);
+		}
 		// Get the number of this disk. Used for spanning ZIP, unsupported here
-		number_disk = getArchiveShort(tunzip);
+		if (iszip64)
+			number_disk = getArchiveLong(tunzip);
+		else
+			number_disk = getArchiveShort(tunzip);
 
 		// Get number of the disk with the start of the central directory
-		number_disk_with_CD = getArchiveShort(tunzip);
+		if (iszip64)
+			number_disk_with_CD = getArchiveLong(tunzip);
+		else
+			number_disk_with_CD = getArchiveShort(tunzip);
 
 		// Get total number of entries in the central dir on this disk
-		tunzip->TotalEntries = getArchiveShort(tunzip);
+		if (iszip64)
+			tunzip->TotalEntries = getArchiveLongLong(tunzip);
+		else
+			tunzip->TotalEntries = getArchiveShort(tunzip);
 
 		// Get total number of entries in the central dir
-		totalEntries_CD = getArchiveShort(tunzip);
+		if (iszip64)
+			totalEntries_CD = getArchiveLongLong(tunzip);
+		else
+			totalEntries_CD = getArchiveShort(tunzip);
 
 		if (tunzip->LastErr) goto badzip;
 
@@ -4097,16 +4194,23 @@ static DWORD openArchive(HANDLE *ptr, void *z, DWORD len, DWORD flags, const cha
 		}
 
 		// Size of the central directory
-		centralDirSize = getArchiveLong(tunzip);
+		if (iszip64)
+			centralDirSize = getArchiveLongLong(tunzip);
+		else
+			centralDirSize = getArchiveLong(tunzip);
 
 		// Offset of start of central directory with respect to the starting disk number
-		tunzip->CentralDirOffset = getArchiveLong(tunzip);
-
+		if (iszip64)
+			tunzip->CentralDirOffset = getArchiveLongLong(tunzip);
+		else
+			tunzip->CentralDirOffset = getArchiveLong(tunzip);
 		// zipfile comment length
+		if (iszip64)
+			seekInZip(tunzip, tunzip->InitialArchiveOffset + tunzip->CentralDirOffset + centralDirSize + size_of_zip64 + 12 + 20 + 20, FILE_BEGIN);
 		tunzip->CommentSize = getArchiveShort(tunzip);
 
 		if (tunzip->LastErr || centralDirPos + tunzip->InitialArchiveOffset < tunzip->CentralDirOffset + centralDirSize) goto badzip;
-		tunzip->ByteBeforeZipArchive = centralDirPos + tunzip->InitialArchiveOffset - (tunzip->CentralDirOffset + centralDirSize);
+		tunzip->ByteBeforeZipArchive = (DWORD)(centralDirPos + tunzip->InitialArchiveOffset - (tunzip->CentralDirOffset + centralDirSize));
 		//	tunzip->CentralDirPos = centralDirPos;
 	gotgzip:
 		// Set Rootdir to current directory. (Assume we unzip there)
@@ -4378,6 +4482,8 @@ typedef unsigned long ULG;      // unsigned 32-bit value
 // Lengths of headers after signatures in bytes
 #define LOCHEAD		26
 #define CENHEAD		42
+#define END64HEAD	44
+#define END64LOCHEAD 16
 #define ENDHEAD		18
 
 // Definitions for extra field handling:
@@ -4397,6 +4503,8 @@ typedef unsigned long ULG;      // unsigned 32-bit value
 #define LOCSIG     0x04034b50L
 #define CENSIG     0x02014b50L
 #define ENDSIG     0x06054b50L
+#define END64SIG   0x06064b50L
+#define END64LOCSIG 0x07064b50L
 #define EXTLOCSIG  0x08074b50L
 
 // The minimum and maximum match lengths
@@ -4612,14 +4720,14 @@ typedef struct
 	ULG			opt_len;			// bit length of current block with optimal trees
 	ULG			static_len;			// bit length of current block with static trees
 
-	ULG			cmpr_bytelen;		// total byte length of compressed file (within the ZIP)
-	ULG			cmpr_len_bits;		// number of bits past 'cmpr_bytelen'
+	ULONGLONG	cmpr_bytelen;		// total byte length of compressed file (within the ZIP)
+	ULONGLONG	cmpr_len_bits;		// number of bits past 'cmpr_bytelen'
 
 	USH			*file_type;			// pointer to UNKNOWN, BINARY or ASCII
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	// input_len is for debugging only since we can't get it by other means.
-	ULG			input_len;			// total byte length of source file
+	ULONGLONG	input_len;			// total byte length of source file
 #endif
 
 } TTREESTATE;
@@ -4632,7 +4740,7 @@ typedef struct
 	char		*out_buf;		// Current output buffer.
 	DWORD		out_offset;		// Current offset in output buffer
 	DWORD		out_size;		// Size of current output buffer
-#ifndef NDEBUG
+#ifdef _DEBUG
 	ULG			bits_sent;		// bit length of the compressed data  only needed for debugging
 #endif
 } TBITSTATE;
@@ -4699,7 +4807,7 @@ typedef struct
 	TTREESTATE		ts;
 	TBITSTATE		bs;
 	TDEFLATESTATE	ds;
-#ifndef NDEBUG
+#ifdef _DEBUG
 	const char		*err;
 #endif
 	unsigned char	level;		// compression level
@@ -4718,10 +4826,12 @@ typedef struct {
 // default values for some of the fields
 typedef struct _TZIPFILEINFO {
 	USH			flg, how;
-	ULG			tim, crc, siz, len;
+	ULG			tim, crc;
+	ULONGLONG	siz, len;
 	DWORD		nam, ext, cext;			// offset of ext must be >= LOCHEAD
 	USH			dsk, att, lflg;			// offset of lflg must be >= LOCHEAD
-	ULG			atx, off;
+	ULG			atx;
+	ULONGLONG	off;
 	char		*extra;					// Extra field (set only if ext != 0)
 	char		*cextra;				// Extra in central (set only if cext != 0)
 	char		iname[MAX_PATH];		// Internal file name after cleanup
@@ -4750,15 +4860,15 @@ typedef struct _TZIP
 	HANDLE		destination;	// If not TZIP_DESTMEMORY, this is the handle to the zip file we write to. Otherwise.
 	// it points to a memory buffer where we write the zip.
 	char		*password;		// A copy of the password from the application.
-	DWORD		writ;			// How many bytes we've written to destination. This is maintained by addSrc(), not
+	ULONGLONG	writ;			// How many bytes we've written to destination. This is maintained by addSrc(), not
 	// writeDestination(), to avoid confusion over seeks.
-	DWORD		ooffset;		// The initial offset where we start writing the zip within destination. (This allows
+	ULONGLONG	ooffset;		// The initial offset where we start writing the zip within destination. (This allows
 	// the app to write the zip to an already open file that has data in it).
 	DWORD		lasterr;		// The last error code.
 
 	// Memory map stuff
 	HANDLE		memorymap;		// If not 0, then this is a memory mapped file handle.
-	DWORD		opos;			// Current (byte) position in "destination".
+	ULONGLONG	opos;			// Current (byte) position in "destination".
 	DWORD		mapsize;		// The size of the memory buffer.
 
 	// Encryption
@@ -4770,12 +4880,12 @@ typedef struct _TZIP
 
 	// ====================================================================
 	// These variables are for the source (that supplies the data to be added to the ZIP)
-	DWORD		isize, totalRead;	// size is not set until close() on pipes
+	ULONGLONG	isize, totalRead;	// size is not set until close() on pipes
 	ULG			crc;				// crc is not set until close(). iwrit is cumulative
 	HANDLE		source;
 	DWORD		lenin, posin;		// These are for a memory buffer source
 	// and a variable for what we've done with the input: (i.e. compressed it!)
-	ULG			csize;				// Compressed size, set by the compression routines.
+	ULONGLONG	csize;				// Compressed size, set by the compression routines.
 	TSTATE		*state;				// We allocate just one state object per zip, because it's big (500k), and store a ptr here. It is freed when the TZIP is freed
 	char		buf[16384];			// Used by some of the compression routines. This must be last!!
 } TZIP;
@@ -5072,7 +5182,7 @@ static DWORD getFileInfo(TZIP *tzip, IZTIMES *times)
 
 // ==================== DEBUG STUFF ====================
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 static void Assert(TSTATE *state, BOOL cond, const char *msg)
 {
 	if (!cond) state->err = msg;
@@ -5150,7 +5260,7 @@ static void ct_init(register TSTATE *state, USH *attr)
 	state->ts.file_type = attr;
 
 	state->ts.cmpr_bytelen = state->ts.cmpr_len_bits = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 	state->ts.input_len = 0;
 #endif
 
@@ -5336,7 +5446,7 @@ static void gen_bitlen(register TSTATE *state, TREE_DESC *desc)
 	}
 	if (overflow == 0) return;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Trace("\nbit length overflow\n");
 #endif
 	// This happens for example on obj2 and pic of the Calgary corpus
@@ -5367,7 +5477,7 @@ static void gen_bitlen(register TSTATE *state, TREE_DESC *desc)
 			if (m > max_code) continue;
 			if (tree[m].dl.len != (USH)bits)
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Trace("code %d bits %d->%d\n", m, tree[m].dl.len, bits);
 #endif
 				state->ts.opt_len += ((long)bits - (long)tree[m].dl.len)*(long)tree[m].fc.freq;
@@ -5407,7 +5517,7 @@ static void gen_codes(register TSTATE *state, CT_DATA *tree, int max_code)
 
 		// Check that the bit counts in bl_count are consistent. The last code
 		// must be all ones
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, code + state->ts.bl_count[MAX_BITS] - 1 == (1 << ((USH)MAX_BITS)) - 1, "inconsistent bit counts");
 		Trace("\ngen_codes: max_code %d ", max_code);
 #endif
@@ -5650,7 +5760,7 @@ static BOOL send_tree(register TSTATE *state, CT_DATA *tree, int max_code)
 				if (!send_code(state, curlen, state->ts.bl_tree)) goto out;
 				--count;
 			}
-#ifndef NDEBUG
+#ifdef _DEBUG
 			Assert(state, count >= 3 && count <= 6, " 3_6?");
 #endif
 			if (!send_code(state, REP_3_6, state->ts.bl_tree) || !send_bits(state, count - 3, 2)) goto out;
@@ -5722,7 +5832,7 @@ static int build_bl_tree(register TSTATE *state)
 
 		// Update opt_len to include the bit length tree and counts
 		state->ts.opt_len += 3 * (max_blindex + 1) + 5 + 5 + 4;
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\ndyn trees: dyn %ld, stat %ld", state->ts.opt_len, state->ts.static_len);
 #endif
 	}
@@ -5751,7 +5861,7 @@ static BOOL send_all_trees(register TSTATE *state, int lcodes, int dcodes, int b
 {
 	int		rank;	// index into BL_order[]
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, lcodes >= 257 && dcodes >= 1 && blcodes >= 4, "not enough codes");
 	Assert(state, lcodes <= L_CODES && dcodes <= D_CODES && blcodes <= BL_CODES, "too many codes");
 	Trace("\nbl counts: ");
@@ -5763,25 +5873,25 @@ static BOOL send_all_trees(register TSTATE *state, int lcodes, int dcodes, int b
 	{
 		for (rank = 0; rank < blcodes; rank++)
 		{
-#ifndef NDEBUG
+#ifdef _DEBUG
 			Trace("\nbl code %2d ", BL_order[rank]);
 #endif
 			if ((state->tzip->flags & TZIP_OPTION_ABORT) || !send_bits(state, state->ts.bl_tree[BL_order[rank]].dl.len, 3)) goto out;
 		}
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\nbl tree: sent %ld", state->bs.bits_sent);
 #endif
 
 		// Send the literal tree
 		if (send_tree(state, (CT_DATA *)state->ts.dyn_ltree, lcodes - 1))
 		{
-#ifndef NDEBUG
+#ifdef _DEBUG
 			Trace("\nlit tree: sent %ld", state->bs.bits_sent);
 #endif
 			// Send the distance tree
 			if (send_tree(state, state->ts.dyn_dtree, dcodes - 1))
 			{
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Trace("\ndist tree: sent %ld", state->bs.bits_sent);
 #endif
 				return(1);
@@ -5847,12 +5957,12 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 	build_tree(state, (TREE_DESC *)(&state->ts.l_desc));
 	if (!(state->tzip->flags & TZIP_OPTION_ABORT))
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\nlit data: dyn %ld, stat %ld", state->ts.opt_len, state->ts.static_len);
 #endif
 
 		build_tree(state, (TREE_DESC *)(&state->ts.d_desc));
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\ndist data: dyn %ld, stat %ld", state->ts.opt_len, state->ts.static_len);
 #endif
 		if (!(state->tzip->flags & TZIP_OPTION_ABORT))
@@ -5869,7 +5979,7 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 				opt_lenb = (state->ts.opt_len + 3 + 7) >> 3;
 				static_lenb = (state->ts.static_len + 3 + 7) >> 3;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 				state->ts.input_len += stored_len;
 				Trace("\nopt %lu(%lu) stat %lu(%lu) stored %lu lit %u dist %u ", opt_lenb, state->ts.opt_len, static_lenb, state->ts.static_len, stored_len, state->ts.last_lit, state->ts.last_dist);
 #endif
@@ -5907,7 +6017,7 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 				upd:				state->ts.cmpr_bytelen += state->ts.cmpr_len_bits >> 3;
 					state->ts.cmpr_len_bits &= 7;
 				}
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Assert(state, ((state->ts.cmpr_bytelen << 3) + state->ts.cmpr_len_bits) == state->bs.bits_sent, "bad compressed size");
 #endif
 				if (!state->tzip->lasterr)
@@ -5919,7 +6029,7 @@ static void flush_block(register TSTATE *state, char *buf, ULG stored_len, DWORD
 						bi_windup(state);
 						state->ts.cmpr_len_bits += 7;	// align on byte boundary
 					}
-#ifndef NDEBUG
+#ifdef _DEBUG
 					Trace("\n");
 #endif
 					// Set compressed size so far
@@ -5952,7 +6062,7 @@ static unsigned char ct_tally(register TSTATE *state, int dist, int lc)
 	{
 		// Here, lc is the match length - MIN_MATCH
 		--dist;				// dist = match distance - 1
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, (USH)dist < (USH)MAX_DIST && (USH)lc <= (USH)(MAX_MATCH - MIN_MATCH) && (USH)d_code(dist) < (USH)D_CODES, "ct_tally: bad match");
 #endif
 		state->ts.dyn_ltree[state->ts.length_code[lc] + LITERALS + 1].fc.freq++;
@@ -5984,7 +6094,7 @@ static unsigned char ct_tally(register TSTATE *state, int dist, int lc)
 		while (dcode--) out_length += (ULG)state->ts.dyn_dtree[dcode].fc.freq * (5L + Extra_dbits[dcode]);
 		out_length >>= 3;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Trace("\nlast_lit %u, last_dist %u, in %ld, out ~%ld(%ld%%) ", state->ts.last_lit, state->ts.last_dist, in_length, out_length, 100L - out_length * 100L / in_length);
 #endif
 		// Should we stop the block here?
@@ -6054,7 +6164,7 @@ static void compress_block(register TSTATE *state, CT_DATA *ltree, CT_DATA *dtre
 
 				// send the distance code
 				code = d_code(dist);
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Assert(state, code < D_CODES, "bad d_code");
 #endif
 				if (!send_code(state, code, dtree)) goto out;
@@ -6089,7 +6199,7 @@ static void compress_block(register TSTATE *state, CT_DATA *ltree, CT_DATA *dtre
 
 static BOOL send_bits(register TSTATE *state, int value, int length)
 {
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, length > 0 && length <= 15, "invalid length");
 	state->bs.bits_sent += (ULG)length;
 #endif
@@ -6111,7 +6221,7 @@ static BOOL send_bits(register TSTATE *state, int value, int length)
 
 		// Store the short in Intel-order
 		state->bs.out_buf[state->bs.out_offset++] = (char)((state->bs.bi_buf) & 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(state->bs.bi_buf) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((state->bs.bi_buf) & 0xFFFF) >> 8);
 
 		state->bs.bi_valid -= ZIP_BUF_SIZE;
 		state->bs.bi_buf = (unsigned)value >> (length - state->bs.bi_valid);
@@ -6167,7 +6277,7 @@ static void bi_windup(register TSTATE *state)
 
 		// Store the short in Intel-order
 		state->bs.out_buf[state->bs.out_offset++] = (char)((state->bs.bi_buf) & 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(state->bs.bi_buf) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((state->bs.bi_buf) & 0xFFFF) >> 8);
 	}
 	else if (state->bs.bi_valid > 0)
 	{
@@ -6179,13 +6289,13 @@ static void bi_windup(register TSTATE *state)
 		}
 
 		// Store the byte
-		state->bs.out_buf[state->bs.out_offset++] = (char)state->bs.bi_buf;
+		state->bs.out_buf[state->bs.out_offset++] = (char)state->bs.bi_buf & 0xFF;
 	}
 
 	// Flush the buffer to the ZIP archive
 	writeDestination(state->tzip, state->bs.out_buf, state->bs.out_offset);
 	state->bs.bi_buf = state->bs.out_offset = state->bs.bi_valid = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 	state->bs.bits_sent = (state->bs.bits_sent + 7) & ~7;
 #endif
 }
@@ -6216,11 +6326,11 @@ static void copy_block(register TSTATE *state, char *block, DWORD len, DWORD hea
 
 		// Store the short in Intel-order
 		state->bs.out_buf[state->bs.out_offset++] = (char)((len)& 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(len) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(len & 0xFFFF) >> 8);
 
 		// Store one's complement
 		state->bs.out_buf[state->bs.out_offset++] = (char)((~len) & 0xff);
-		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)(~len) >> 8);
+		state->bs.out_buf[state->bs.out_offset++] = (char)((USH)((~len) & 0xFF) >> 8);
 
 		// Flush the 2 shorts now (because we're going to flush the block
 		// which is in a different memory buffer)
@@ -6228,7 +6338,7 @@ static void copy_block(register TSTATE *state, char *block, DWORD len, DWORD hea
 		state->bs.out_offset = 0;
 
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		state->bs.bits_sent += (2 * 16);
 #endif
 	}
@@ -6236,7 +6346,7 @@ static void copy_block(register TSTATE *state, char *block, DWORD len, DWORD hea
 	// Write out the block
 	writeDestination(state->tzip, block, len);
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	state->bs.bits_sent += (ULG)len << 3;
 #endif
 }
@@ -6362,7 +6472,7 @@ static int longest_match(register TSTATE *state, unsigned cur_match)
 
 	// The code is optimized for HASH_BITS >= 8 and MAX_MATCH-2 multiple of 16.
 	// It is easy to get rid of this optimization if necessary.
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, HASH_BITS >= 8 && MAX_MATCH == 258, "Code too clever");
 #endif
 
@@ -6373,13 +6483,13 @@ static int longest_match(register TSTATE *state, unsigned cur_match)
 	// Do not waste too much time if we already have a good match:
 	if (state->ds.prev_length >= state->ds.good_match) chain_length >>= 2;
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 	Assert(state, state->ds.strstart <= state->ds.window_size - MIN_LOOKAHEAD, "insufficient lookahead");
 #endif
 
 	do
 	{
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, cur_match < state->ds.strstart, "no future");
 #endif
 		match = state->ds.window + cur_match;
@@ -6408,7 +6518,7 @@ static int longest_match(register TSTATE *state, unsigned cur_match)
 			*++scan == *++match && *++scan == *++match &&
 			scan < strend);
 
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, scan <= state->ds.window + (unsigned)(state->ds.window_size - 1), "wild scan");
 #endif
 
@@ -6513,7 +6623,7 @@ static void fill_window(register TSTATE *state)
 		//   strstart + lookahead <= input_size => more >= MIN_LOOKAHEAD.
 		// Otherwise, window_size == 2*WSIZE so more >= 2.
 		// If there was sliding, more >= WSIZE. So in all cases, more >= 2.
-#ifndef NDEBUG
+#ifdef _DEBUG
 		Assert(state, more >= 2, "more < 2");
 #endif
 		if (!(n = readFromSource(state->tzip, (char *)(state->ds.window + state->ds.strstart + state->ds.lookahead), more)))
@@ -6599,7 +6709,7 @@ static void deflate_fast(register TSTATE *state)
 				match_length = 0;
 				state->ds.ins_h = state->ds.window[state->ds.strstart];
 				UPDATE_HASH(state->ds.ins_h, state->ds.window[state->ds.strstart + 1]);
-#ifndef NDEBUG
+#ifdef _DEBUG
 				Assert(state, MIN_MATCH == 3, "Call UPDATE_HASH() MIN_MATCH-3 more times");
 #endif
 			}
@@ -6793,10 +6903,26 @@ static void putextended(TZIPFILEINFO *z, TZIP *tzip)
 	writeDestShort(tzip, EXTLOCSIG >> 16);
 	writeDestShort(tzip, z->crc);
 	writeDestShort(tzip, z->crc >> 16);
-	writeDestShort(tzip, z->siz);
-	writeDestShort(tzip, z->siz >> 16);
-	writeDestShort(tzip, z->len);
-	writeDestShort(tzip, z->len >> 16);
+	if (z->siz >= ULONG_MAX)
+	{
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, -1);
+	}
+	else
+	{
+		writeDestShort(tzip, (DWORD)z->siz);
+		writeDestShort(tzip, (DWORD)(z->siz >> 16));
+	}
+	if (z->len >= ULONG_MAX)
+	{
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, -1);
+	}
+	else
+	{
+		writeDestShort(tzip, (DWORD)z->len);
+		writeDestShort(tzip, (DWORD)(z->len >> 16));
+	}
 }
 
 static void putpartial(TZIPFILEINFO *z, TZIP *tzip)
@@ -6805,10 +6931,26 @@ static void putpartial(TZIPFILEINFO *z, TZIP *tzip)
 	writeDestShort(tzip, z->tim >> 16);
 	writeDestShort(tzip, z->crc);
 	writeDestShort(tzip, z->crc >> 16);
-	writeDestShort(tzip, z->siz);
-	writeDestShort(tzip, z->siz >> 16);
-	writeDestShort(tzip, z->len);
-	writeDestShort(tzip, z->len >> 16);
+	if (z->siz >= ULONG_MAX)
+	{
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, -1);
+	}
+	else
+	{
+		writeDestShort(tzip, (DWORD)z->siz);
+		writeDestShort(tzip, (DWORD)(z->siz >> 16));
+	}
+	if (z->len >= ULONG_MAX)
+	{
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, -1);
+	}
+	else
+	{
+		writeDestShort(tzip, (DWORD)z->len);
+		writeDestShort(tzip, (DWORD)(z->len >> 16));
+	}
 	writeDestShort(tzip, z->nam);
 }
 
@@ -6832,12 +6974,32 @@ static void putlocal(TZIPFILEINFO *z, TZIP *tzip)
 	{
 		writeDestShort(tzip, LOCSIG);
 		writeDestShort(tzip, LOCSIG >> 16);
-		writeDestShort(tzip, (USH)20);		// Needs PKUNZIP 2.0 to unzip it
+		writeDestShort(tzip, (USH)45);		// Needs PKUNZIP 4.5 to unzip it
 		writeDestShort(tzip, z->lflg);
 		writeDestShort(tzip, z->how);
-		putpartial(z, tzip);
-		writeDestShort(tzip, z->ext);
+		//putpartial(z, tzip);
+		writeDestShort(tzip, z->tim);
+		writeDestShort(tzip, z->tim >> 16);
+		writeDestShort(tzip, z->crc);
+		writeDestShort(tzip, z->crc >> 16);
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, -1);
+		writeDestShort(tzip, z->nam);
+		writeDestShort(tzip, z->ext + 20);
 		writeDestination(tzip, z->iname, z->nam);
+		
+		writeDestShort(tzip, 1);
+		writeDestShort(tzip, 16);
+		writeDestShort(tzip, (DWORD)z->len & 0xFFFFFFFF);
+		writeDestShort(tzip, (DWORD)((z->len >> 16) & 0xFFFFFFFF));
+		writeDestShort(tzip, (DWORD)(z->len >> 32));
+		writeDestShort(tzip, (DWORD)(z->len >> 48));
+		writeDestShort(tzip, (DWORD)z->siz & 0xFFFFFFFF);
+		writeDestShort(tzip, (DWORD)((z->siz >> 16) & 0xFFFFFFFF));
+		writeDestShort(tzip, (DWORD)(z->siz >> 32));
+		writeDestShort(tzip, (DWORD)(z->siz >> 48));
 		if (z->ext) writeDestination(tzip, z->extra, z->ext);
 	}
 }
@@ -6854,10 +7016,8 @@ static void addCentral(register TZIP *tzip)
 	// If there was an error adding files, then don't write the Central directory
 	if (!tzip->lasterr && !(tzip->flags & TZIP_DONECENTRALDIR))
 	{
-		DWORD		numentries;
-		ULG		pos_at_start_of_central;
-
-		numentries = 0;
+		ULONGLONG	numentries = 0;
+		ULONGLONG	pos_at_start_of_central;
 
 		{
 			register TZIPFILEINFO	*zfi;
@@ -6870,24 +7030,61 @@ static void addCentral(register TZIP *tzip)
 				// Write this TZIPFILEINFO entry to the Central directory
 				writeDestShort(tzip, CENSIG);
 				writeDestShort(tzip, CENSIG >> 16);
-				writeDestShort(tzip, (USH)0x0B17);		// 0x0B00 is win32 os-code. 0x17 is 23 in decimal: zip 2.3
-				writeDestShort(tzip, (USH)20);			// Needs PKUNZIP 2.0 to unzip it
+				writeDestShort(tzip, (USH)45);		// zip 4.5
+				writeDestShort(tzip, (USH)45);			// Needs PKUNZIP 4.5 to unzip it
 				writeDestShort(tzip, zfi->flg);
 				writeDestShort(tzip, zfi->how);
 				putpartial(zfi, tzip);
-				writeDestShort(tzip, zfi->cext);
+				writeDestShort(tzip, zfi->cext + (zfi->off >= ULONG_MAX || zfi->len >= ULONG_MAX || zfi->siz >= ULONG_MAX ? 4 : 0) 
+								+ (zfi->off >= ULONG_MAX ? 8 : 0) + (zfi->siz >= ULONG_MAX ? 8 : 0) + (zfi->len >= ULONG_MAX ? 8 : 0));
 				writeDestShort(tzip, 0);
 				writeDestShort(tzip, zfi->dsk);
 				writeDestShort(tzip, zfi->att);
 				writeDestShort(tzip, zfi->atx);
 				writeDestShort(tzip, zfi->atx >> 16);
-				writeDestShort(tzip, zfi->off);
-				writeDestShort(tzip, zfi->off >> 16);
+				if (zfi->off >= ULONG_MAX)
+				{
+					writeDestShort(tzip, -1);
+					writeDestShort(tzip, -1);
+				}
+				else
+				{
+					writeDestShort(tzip, (DWORD)zfi->off & 0xFFFFFFFF);
+					writeDestShort(tzip, (DWORD)(zfi->off >> 16));
+				}
 				writeDestination(tzip, zfi->iname, zfi->nam);
+				if (zfi->off >= ULONG_MAX || zfi->len >= ULONG_MAX || zfi->siz >= ULONG_MAX)
+				{
+					writeDestShort(tzip, 1);
+					writeDestShort(tzip, (zfi->off >= ULONG_MAX ? 8 : 0) + (zfi->siz >= ULONG_MAX ? 8 : 0) + (zfi->len >= ULONG_MAX ? 8 : 0));
+					if (zfi->len >= ULONG_MAX)
+					{
+						writeDestShort(tzip, (DWORD)zfi->len & 0xFFFFFFFF);
+						writeDestShort(tzip, (DWORD)(zfi->len >> 16));
+						writeDestShort(tzip, (DWORD)(zfi->len >> 32));
+						writeDestShort(tzip, (DWORD)(zfi->len >> 48));
+					}
+					if (zfi->siz >= ULONG_MAX)
+					{
+						writeDestShort(tzip, (DWORD)zfi->siz & 0xFFFFFFFF);
+						writeDestShort(tzip, (DWORD)(zfi->siz >> 16));
+						writeDestShort(tzip, (DWORD)(zfi->siz >> 32));
+						writeDestShort(tzip, (DWORD)(zfi->siz >> 48));
+					}
+					if (zfi->off >= ULONG_MAX)
+					{
+						writeDestShort(tzip, (DWORD)zfi->off & 0xFFFFFFFF);
+						writeDestShort(tzip, (DWORD)(zfi->off >> 16));
+						writeDestShort(tzip, (DWORD)(zfi->off >> 32));
+						writeDestShort(tzip, (DWORD)(zfi->off >> 48));
+					}
+				}
 				if (zfi->cext) writeDestination(tzip, zfi->cextra, zfi->cext);
 
 				// Update count of bytes written
-				tzip->writ += 4 + CENHEAD + (unsigned int)zfi->nam + (unsigned int)zfi->cext;
+				tzip->writ += 4 + CENHEAD + (unsigned int)zfi->nam + (unsigned int)zfi->cext 
+								+ (zfi->off >= ULONG_MAX || zfi->len >= ULONG_MAX || zfi->siz >= ULONG_MAX ? 4 : 0) 
+								+ (zfi->off >= ULONG_MAX ? 8 : 0) + (zfi->siz >= ULONG_MAX ? 8 : 0) + (zfi->len >= ULONG_MAX ? 8 : 0);
 
 				// Another entry added
 				++numentries;
@@ -6898,23 +7095,111 @@ static void addCentral(register TZIP *tzip)
 				zfi = zfinext;
 			}
 		}
+		if (tzip->writ >= ULONG_MAX)
+		{
+			ULONGLONG pos_at_start_of_end64 = tzip->writ + tzip->ooffset;
+			// Write the Zip64 end of central directory record to the zip.
+			writeDestShort(tzip, END64SIG);
+			writeDestShort(tzip, END64SIG >> 16);
+			writeDestShort(tzip, END64HEAD);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, (USH)45);
+			writeDestShort(tzip, (USH)45);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(numentries >> 16));
+			writeDestShort(tzip, (DWORD)(numentries >> 32));
+			writeDestShort(tzip, (DWORD)(numentries >> 48));
+			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(numentries >> 16));
+			writeDestShort(tzip, (DWORD)(numentries >> 32));
+			writeDestShort(tzip, (DWORD)(numentries >> 48));
+			ULONGLONG size_of_central = tzip->writ - pos_at_start_of_central;
+			writeDestShort(tzip, (DWORD)size_of_central & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(size_of_central >> 16));
+			writeDestShort(tzip, (DWORD)(size_of_central >> 32));
+			writeDestShort(tzip, (DWORD)(size_of_central >> 48));
+			ULONGLONG offset_central = pos_at_start_of_central + tzip->ooffset;
+			writeDestShort(tzip, (DWORD)offset_central & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(offset_central >> 16));
+			writeDestShort(tzip, (DWORD)(offset_central >> 32));
+			writeDestShort(tzip, (DWORD)(offset_central >> 48));
+			tzip->writ += 4 + 8 + END64HEAD + 0;
 
-		// Write the end of the central-directory-data to the zip.
-		writeDestShort(tzip, ENDSIG);
-		writeDestShort(tzip, ENDSIG >> 16);
-		writeDestShort(tzip, 0);
-		writeDestShort(tzip, 0);
-		writeDestShort(tzip, numentries);
-		writeDestShort(tzip, numentries);
-		numentries = tzip->writ - pos_at_start_of_central;
-		writeDestShort(tzip, numentries);
-		writeDestShort(tzip, numentries >> 16);
-		pos_at_start_of_central += tzip->ooffset;
-		writeDestShort(tzip, pos_at_start_of_central);
-		writeDestShort(tzip, pos_at_start_of_central >> 16);
-		writeDestShort(tzip, 0);
-		tzip->writ += 4 + ENDHEAD + 0;
+			// Write the Zip64 end of central directory locator to the zip.
+			writeDestShort(tzip, END64LOCSIG);
+			writeDestShort(tzip, END64LOCSIG >> 16);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, (DWORD)pos_at_start_of_end64 & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(pos_at_start_of_end64 >> 16));
+			writeDestShort(tzip, (DWORD)(pos_at_start_of_end64 >> 32));
+			writeDestShort(tzip, (DWORD)(pos_at_start_of_end64 >> 48));
+			writeDestShort(tzip, 1);
+			writeDestShort(tzip, 0);
+			tzip->writ += 4 + END64LOCHEAD + 0;
 
+			// Write the end of the central-directory-data to the zip.
+			writeDestShort(tzip, ENDSIG);
+			writeDestShort(tzip, ENDSIG >> 16);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			if (numentries >= UCHAR_MAX)
+			{
+				writeDestShort(tzip, -1);
+				writeDestShort(tzip, -1);
+			}
+			else
+			{
+				writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+				writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			}
+			if (size_of_central >= ULONG_MAX)
+			{
+				writeDestShort(tzip, -1);
+				writeDestShort(tzip, -1);
+			}
+			else
+			{
+				writeDestShort(tzip, (DWORD)size_of_central & 0xFFFFFFFF);
+				writeDestShort(tzip, (DWORD)(size_of_central >> 16));
+			}
+			if (offset_central >= ULONG_MAX)
+			{
+				writeDestShort(tzip, -1);
+				writeDestShort(tzip, -1);
+			}
+			else
+			{
+				writeDestShort(tzip, (DWORD)offset_central & 0xFFFFFFFF);
+				writeDestShort(tzip, (DWORD)(offset_central >> 16));
+			}
+			writeDestShort(tzip, 0);
+			tzip->writ += 4 + ENDHEAD + 0;
+		} 
+		else
+		{
+			// Write the end of the central-directory-data to the zip.
+			writeDestShort(tzip, ENDSIG);
+			writeDestShort(tzip, ENDSIG >> 16);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, 0);
+			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			numentries = (DWORD)(tzip->writ - pos_at_start_of_central);
+			writeDestShort(tzip, (DWORD)numentries & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(numentries >> 16));
+			pos_at_start_of_central += (DWORD)tzip->ooffset;
+			writeDestShort(tzip, (DWORD)pos_at_start_of_central & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(pos_at_start_of_central >> 16));
+			writeDestShort(tzip, 0);
+			tzip->writ += 4 + ENDHEAD + 0;
+		}
 		// Done writing the central dir. Flag this so that another call here does not
 		// write another central dir
 		tzip->flags |= TZIP_DONECENTRALDIR;
@@ -7030,7 +7315,7 @@ static void writeDestShort(register TZIP *tzip, DWORD data)
 	if (!tzip->lasterr)
 	{
 		bytes[0] = (unsigned char)(data & 0xff);
-		bytes[1] = (unsigned char)(data >> 8);
+		bytes[1] = (unsigned char)((data >> 8) & 0xFF);
 
 		// Encrypting data?
 		if (tzip->flags & TZIP_ENCRYPT)
@@ -7159,7 +7444,7 @@ static void writeDestination(register TZIP *tzip, const char *buf, DWORD size)
 * ZIP destination (ZIP output file).
 */
 
-static BOOL seekDestination(TZIP *tzip, unsigned int pos)
+static BOOL seekDestination(TZIP *tzip, LONGLONG pos)
 {
 	if (!(tzip->flags & TZIP_CANSEEK))
 	{
@@ -7177,9 +7462,25 @@ static BOOL seekDestination(TZIP *tzip, unsigned int pos)
 		}
 		tzip->opos = pos;
 	}
-	else if (SetFilePointer(tzip->destination, pos + tzip->ooffset, 0, FILE_BEGIN) == 0xFFFFFFFF) goto seekerr;
+	else
+	{
+		LONGLONG offset = pos + tzip->ooffset;
+		if (offset > LONG_MAX)
+		{
+			LONG highpart = 0;
+			highpart = offset >> 32;
+			if (SetFilePointer(tzip->destination, (LONG)(offset & 0xFFFFFFFF), &highpart, FILE_BEGIN) == 0xFFFFFFFF)
+				goto seekerr;
+		}
+		else
+		{
+			if (SetFilePointer(tzip->destination, (LONG)((pos + tzip->ooffset) & 0xFFFFFFFF), 0, FILE_BEGIN) == 0xFFFFFFFF)
+				goto seekerr;
+		}
+	}
 	return(1);
 }
+
 
 
 
@@ -7190,19 +7491,21 @@ static BOOL seekDestination(TZIP *tzip, unsigned int pos)
 * open source file handle.
 */
 
-static DWORD srcHandleInfo(TZIP *tzip, DWORD len, IZTIMES *times)
+static DWORD srcHandleInfo(TZIP *tzip, ULONGLONG len, IZTIMES *times)
 {
 	DWORD	res;
-
-	if ((tzip->ooffset = SetFilePointer(tzip->source, 0, 0, FILE_CURRENT)) != (DWORD)-1)
+	LARGE_INTEGER aOffset;
+	aOffset.QuadPart = 0;
+	if (SetFilePointerEx(tzip->source, aOffset, &aOffset, FILE_CURRENT))
 	{
+		tzip->ooffset = aOffset.QuadPart;
 		tzip->flags |= TZIP_SRCCANSEEK;
 		if ((res = getFileInfo(tzip, times)) != ZR_OK) return(res);
 	}
 	else
 	{
 		tzip->ooffset = 0;
-		if (!len) len = (DWORD)-1;		// Can't know size until at the end unless we were told explicitly!
+		if (!len) len = (ULONGLONG)-1;		// Can't know size until at the end unless we were told explicitly!
 		tzip->isize = len;
 	}
 
@@ -7276,7 +7579,7 @@ static DWORD closeSource(register TZIP *tzip)
 	tzip->flags &= ~TZIP_SRCCLOSEFH;
 
 	// Check that we've accounted for all the source bytes (assuming we knew the size initially)
-	if (tzip->isize != (DWORD)-1 && tzip->isize != tzip->totalRead) ret = ZR_MISSIZE;
+	if (tzip->isize != (ULONGLONG)-1 && tzip->isize != tzip->totalRead) ret = ZR_MISSIZE;
 
 	// Update the count. The CRC has been done anyway, so we may as well
 	tzip->isize = tzip->totalRead;
@@ -7335,7 +7638,7 @@ static void ideflate(TZIP *tzip, TZIPFILEINFO *zfi)
 		//		state->ds.window_size =
 		state->ts.last_lit = state->ts.last_dist = state->ts.last_flags =
 			state->bs.out_offset = state->bs.bi_buf = state->bs.bi_valid = 0;
-#ifndef NDEBUG
+#ifdef _DEBUG
 		state->bs.bits_sent = 0;
 #endif
 		ct_init(state, &zfi->att);
@@ -7501,7 +7804,8 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 	if (tzip->flags & TZIP_DONECENTRALDIR) return(ZR_ENDED);
 
 	// Re-init some stuff potentially left over from a previous addSrc()
-	tzip->ooffset = tzip->crc = tzip->csize = tzip->totalRead = 0;
+	tzip->ooffset = tzip->totalRead = tzip->csize = 0;
+	tzip->crc = 0;
 	tzip->flags &= ~(TZIP_SRCCANSEEK | TZIP_SRCCLOSEFH | TZIP_SRCMEMORY | TZIP_ENCRYPT);
 
 	// ==================== Get the source (to compress to the ZIP) ===================
@@ -7513,9 +7817,9 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 	{
 		if (!src) goto badargs;
 		if (flags & ZIP_UNICODE)
-			tzip->source = CreateFileW((const WCHAR *)src, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+			tzip->source = CreateFileW((const WCHAR *)src, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
 		else
-			tzip->source = CreateFileA((const char *)src, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+			tzip->source = CreateFileA((const char *)src, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
 		if (tzip->source == INVALID_HANDLE_VALUE)
 			passex = ZR_NOFILE;
 		else
@@ -7612,6 +7916,8 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 	if (flags & ZIP_UNICODE)
 	{
 		zfi->nam = WideCharToMultiByte(CP_UTF8, 0, (const WCHAR *)destname, -1, zfi->iname, MAX_PATH, 0, 0);
+		if (zfi->nam)
+			zfi->nam--;
 	}
 	else
 	{
@@ -7658,17 +7964,17 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 		xloc[2] = EB_UT_LEN(3);       // length of data part of e.f.
 		xloc[3] = 0;
 		xloc[4] = EB_UT_FL_MTIME | EB_UT_FL_ATIME | EB_UT_FL_CTIME;
-		xloc[5] = (char)(times.mtime);
-		xloc[6] = (char)(times.mtime >> 8);
-		xloc[7] = (char)(times.mtime >> 16);
+		xloc[5] = (char)(times.mtime & 0xFF);
+		xloc[6] = (char)((times.mtime >> 8) & 0xFF);
+		xloc[7] = (char)((times.mtime >> 16) & 0xFF);
 		xloc[8] = (char)(times.mtime >> 24);
-		xloc[9] = (char)(times.atime);
-		xloc[10] = (char)(times.atime >> 8);
-		xloc[11] = (char)(times.atime >> 16);
+		xloc[9] = (char)(times.atime & 0xFF);
+		xloc[10] = (char)((times.atime >> 8) & 0xFF);
+		xloc[11] = (char)((times.atime >> 16) & 0xFF);
 		xloc[12] = (char)(times.atime >> 24);
-		xloc[13] = (char)(times.ctime);
-		xloc[14] = (char)(times.ctime >> 8);
-		xloc[15] = (char)(times.ctime >> 16);
+		xloc[13] = (char)(times.ctime & 0xFF);
+		xloc[14] = (char)((times.ctime >> 8) & 0xFF);
+		xloc[15] = (char)((times.ctime >> 16) & 0xFF);
 		xloc[16] = (char)(times.ctime >> 24);
 		CopyMemory(zfi->cextra, zfi->extra, EB_C_UT_SIZE);
 		zfi->cextra[EB_LEN] = EB_UT_LEN(1);
@@ -7705,11 +8011,11 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 	zfi->lflg = zfi->flg;
 	zfi->how = (USH)method;
 	// If STORE method, we know the "compressed" size right now, so set it. DEFLATE method, we'll get it later
-	if (method == STORE && tzip->isize != (DWORD)-1) zfi->siz = tzip->isize + passex;
-	zfi->len = (ULG)tzip->isize;
+	if (method == STORE && tzip->isize != (ULONGLONG)-1) zfi->siz = tzip->isize + passex;
+	zfi->len = tzip->isize;
 
 	// Set the (byte) offset within the ZIP archive where this local record starts
-	zfi->off = tzip->writ + tzip->ooffset;
+	zfi->off = (tzip->writ + tzip->ooffset);
 
 	// ============ Compress the source to the ZIP archive ================
 
@@ -7735,7 +8041,7 @@ static DWORD addSrc(register TZIP *tzip, const void *destname, const void *src, 
 		tzip->writ = 11 + (unsigned int)zfi->nam;
 	else
 	{
-		tzip->writ += 4 + LOCHEAD + (unsigned int)zfi->nam + (unsigned int)zfi->ext;
+		tzip->writ += 4 + LOCHEAD + (unsigned int)zfi->nam + (unsigned int)zfi->ext + 20; // + 20 = Zip64
 
 		// If needed, write the encryption header
 		if (passex)
@@ -7794,8 +8100,8 @@ compress:
 			// Write out the CRC and uncompressed size
 			writeDestShort(tzip, tzip->crc);
 			writeDestShort(tzip, tzip->crc >> 16);
-			writeDestShort(tzip, tzip->totalRead);
-			writeDestShort(tzip, tzip->totalRead >> 16);
+			writeDestShort(tzip, (DWORD)tzip->totalRead & 0xFFFFFFFF);
+			writeDestShort(tzip, (DWORD)(tzip->totalRead >> 16));
 			if (tzip->lasterr != ZR_OK) goto reterr;
 		}
 	}
@@ -8443,7 +8749,7 @@ DWORD WINAPI ZipGetMemory(HZIP tzip, void **pbuf, DWORD *plen, HANDLE *base)
 		{
 			// Return the memory buffer and size
 			*pbuf = (void *)((TZIP *)tzip)->destination;
-			*plen = ((TZIP *)tzip)->writ;
+			*plen = (DWORD)((TZIP *)tzip)->writ;
 		}
 
 		// Does caller want everything freed except for the memory?
@@ -8486,7 +8792,8 @@ DWORD WINAPI ZipResetMemory(HZIP tzip)
 	}
 
 	// Reset certain fields of the TZIP
-	((TZIP *)tzip)->lasterr = ((TZIP *)tzip)->opos = ((TZIP *)tzip)->writ = 0;
+	((TZIP *)tzip)->lasterr = 0;
+	((TZIP *)tzip)->opos = ((TZIP *)tzip)->writ = 0;
 	((TZIP *)tzip)->state->ts.static_dtree[0].dl.len = 0;
 	return(ZR_OK);
 }

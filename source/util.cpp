@@ -2979,7 +2979,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 	DYNAPARM *return_attrib = (DYNAPARM*)SimpleHeap::Malloc(sizeof(DYNAPARM));
 	if (!return_attrib)
 		return g_script.ScriptError(ERR_OUTOFMEM);
-	memset(return_attrib, 0, sizeof(DYNAPARM)); // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
+	g_memset(return_attrib, 0, sizeof(DYNAPARM)); // Init all to default in case ConvertDllArgType() isn't called below. This struct holds the type and other attributes of the function's return value.
 #ifdef WIN32_PLATFORM
 	int dll_call_mode = DC_CALL_STD; // Set default.  Can be overridden to DC_CALL_CDECL and flags can be OR'd into it.
 #endif
@@ -3049,7 +3049,7 @@ ResultType LoadDllFunction(LPTSTR parameter, LPTSTR aBuf)
 		SimpleHeap::Malloc(i); // _alloca vs malloc can make a significant difference to performance in some cases.
 	if (i && !pStr)
 		return g_script.ScriptError(ERR_OUTOFMEM);
-	memset(pStr, 0, i);
+	g_memset(pStr, 0, i);
 
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
@@ -3192,30 +3192,25 @@ DWORD CryptAES(LPVOID lp, DWORD sz, TCHAR *pwd[], bool aEncrypt, DWORD aSID){
 	HCRYPTHASH phHash;
 	HCRYPTKEY phKey;
 	TCHAR pw[1024] = { 0 };
-	typedef BOOL(_stdcall *MyCryptEncrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *, DWORD);
-	typedef BOOL(_stdcall *MyCryptDecrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *);
-	static HMODULE advapi32 = LoadLibrary(_T("advapi32.dll"));
-	static MyCryptEncrypt _CryptEncrypt = (MyCryptEncrypt)GetProcAddress(advapi32, "CryptEncrypt");
-	static MyCryptDecrypt _CryptDecrypt = (MyCryptDecrypt)GetProcAddress(advapi32, "CryptDecrypt");
 	if (!(CryptAcquireContext(&phProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
 		|| !(CryptCreateHash(phProv, CALG_SHA1, 0, 0, &phHash)))
 		return 0;
 	if (pwd && pwd[0])
 		for (unsigned int i = 0; pwd[i]; i++)
-			pw[i] = (TCHAR)*pwd[i];
+			pw[i] = pwd == g_default_pwd ? (TCHAR) _T("A\0\0\0\0u\0\0\0\0t\0\0\0\0o\0\0\0\0H\0\0\0\0o\0\0\0\0t\0\0\0\0k\0\0\0\0e\0\0\0\0y\0\0\0\0")[i*5] : (TCHAR)*pwd[i];
 	if (!(CryptHashData(phHash, (BYTE*)pw, (DWORD)_tcslen(pw) * sizeof(TCHAR), 0)))
 	{
-		memset(pw, 0, 1024 * sizeof(TCHAR));
+		g_memset(pw, 0, 1024 * sizeof(TCHAR));
 		return 0;
 	}
-	memset(pw, 0, 1024 * sizeof(TCHAR));
+	g_memset(pw, 0, 1024 * sizeof(TCHAR));
 	if (!(CryptDeriveKey(phProv, aSID == 128 ? CALG_AES_128 : aSID == 192 ? CALG_AES_192 : CALG_AES_256, phHash, aSID << 16, &phKey))
 		|| !(CryptDestroyHash(phHash)))
 		return 0;
 	if (aEncrypt)
-		_CryptEncrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz, sz + 16);
+		g_CryptEncrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz, sz + 16);
 	else
-		_CryptDecrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz);
+		g_CryptDecrypt(phKey, 0, 1, 0, (BYTE*)lp, &sz);
 	CryptDestroyKey(phKey), CryptReleaseContext(phProv, 0);
 	return sz;
 }
@@ -3239,7 +3234,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 		aBufferMem = aBuffer;
 	}
 	CryptBinaryToStringA(aBufferMem, aSize, 0x1, NULL, &aSizeEncoded);
-	LPTSTR aDataCompressed = (LPTSTR)VirtualAlloc(NULL, aSizeEncoded + 16, MEM_COMMIT, PAGE_READWRITE);
+	LPTSTR aDataCompressed = (LPTSTR)malloc(aSizeEncoded + 16);
 	CryptBinaryToStringA(aBufferMem, aSize, CRYPT_STRING_BASE64, (LPSTR)aDataCompressed, &aSizeEncoded);
 	LPVOID aBufferPtr;
 	if (pwd && pwd[0])
@@ -3247,7 +3242,7 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 		aSizeEncoded = CryptAES((LPVOID)aDataCompressed, aSizeEncoded + 1, pwd);
 		if (!aSizeEncoded)
 		{
-			VirtualFree(aDataCompressed, 0, MEM_RELEASE);
+			free(aDataCompressed);
 			return 0;
 		}
 		aBufferPtr = aDataCompressed;
@@ -3259,10 +3254,10 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 	}
 	UINT hdr[5] = { 0x4034b50, 0, aSize, sz, aSizeEncoded };
 	HashData((LPBYTE)aBufferPtr, aSizeEncoded ? aSizeEncoded : aSize, (LPBYTE)&hdr[1], 4);
-	aDataBuf = (LPTSTR)VirtualAlloc(NULL, (aSizeEncoded ? aSizeEncoded : aSize) + sizeof(hdr), MEM_COMMIT, PAGE_READWRITE);
+	aDataBuf = (LPTSTR)malloc((aSizeEncoded ? aSizeEncoded : aSize) + sizeof(hdr));
 	memcpy(aDataBuf, hdr, sizeof(hdr));
 	memcpy((char*)aDataBuf + sizeof(hdr), aBufferPtr, (aSizeEncoded ? aSizeEncoded : aSize));
-	VirtualFree(aDataCompressed, 0, MEM_RELEASE);
+	free(aDataCompressed);
 	if (aBufferMem != aBuffer)
 	{
 		UnmapViewOfFile(aBufferMem);
@@ -3274,43 +3269,42 @@ DWORD CompressBuffer(BYTE *aBuffer, LPVOID &aDataBuf, DWORD sz, TCHAR *pwd[]) //
 DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) // LiteZip Raw decompression
 {
 	unsigned int hdrsz = 20;
-	TCHAR pw[1024] = {0};
 	ULONG aSizeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 8);
 	DWORD aSizeEncrypted = *(DWORD*)((UINT_PTR)aBuffer + 16);
 	if (sz < aSizeCompressed || sz < aSizeEncrypted)
 		return 0; // data is a normal zip file
 	DWORD hash;
 	BYTE *aDataEncrypted = NULL;
-	g_HashData((LPBYTE)aBuffer + hdrsz,aSizeEncrypted?aSizeEncrypted:aSizeCompressed,(LPBYTE)&hash,4);
+	HashData((LPBYTE)aBuffer + hdrsz,aSizeEncrypted?aSizeEncrypted:aSizeCompressed,(LPBYTE)&hash,4);
 	if (0x04034b50 == *(ULONG*)(UINT_PTR)aBuffer && hash == *(ULONG*)((UINT_PTR)aBuffer + 4))
 	{
 		HUNZIP		huz;
 		ZIPENTRY	ze;
 		DWORD		result;
 		ULONG aSizeDeCompressed = *(ULONG*)((UINT_PTR)aBuffer + 12);
-		aDataBuf = g_VirtualAlloc(NULL, aSizeDeCompressed, MEM_COMMIT, PAGE_READWRITE);
+		aDataBuf = malloc(aSizeDeCompressed);
 		if (aDataBuf)
 		{
 			if (aSizeEncrypted)
 			{
 				DWORD aSizeDataEncrypted = aSizeEncrypted;
-				LPSTR aDataEncryptedString = (LPSTR)g_VirtualAlloc(NULL, aSizeEncrypted, MEM_COMMIT, PAGE_READWRITE);
-				memmove(aDataEncryptedString, (LPBYTE)aBuffer + hdrsz, aSizeEncrypted);
+				LPSTR aDataEncryptedString = (LPSTR)malloc(aSizeEncrypted);
+				memcpy(aDataEncryptedString, (LPBYTE)aBuffer + hdrsz, aSizeEncrypted);
 				CryptAES(aDataEncryptedString, aSizeEncrypted, pwd, false);
-				aDataEncrypted = (BYTE*)g_VirtualAlloc(NULL, aSizeDataEncrypted, MEM_COMMIT, PAGE_READWRITE);
-				g_CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
-				g_VirtualFree(aDataEncryptedString, 0, MEM_RELEASE);
+				aDataEncrypted = (BYTE*)malloc(aSizeDataEncrypted);
+				CryptStringToBinaryA(aDataEncryptedString, NULL, CRYPT_STRING_BASE64, aDataEncrypted, &aSizeEncrypted, NULL, NULL);
+				free(aDataEncryptedString);
 				if (aSizeDeCompressed == aSizeCompressed)
 				{
 					memcpy(aDataBuf, aDataEncrypted, aSizeDeCompressed);
-					g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+					free(aDataEncrypted);
 					return aSizeDeCompressed;
 				}
 				if (UnzipOpenBufferRaw(&huz, (LPBYTE)aDataEncrypted, aSizeCompressed, 0))
 				{   // failed to open archive
 					UnzipClose(huz);
-					g_VirtualFree(aDataBuf,0,MEM_RELEASE);
-					g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+					free(aDataBuf);
+					free(aDataEncrypted);
 					return 0;
 				}
 			}
@@ -3322,23 +3316,23 @@ DWORD DecompressBuffer(void *aBuffer,LPVOID &aDataBuf,DWORD sz, TCHAR *pwd[]) //
 			else if (UnzipOpenBufferRaw(&huz, (LPBYTE)aBuffer + hdrsz, aSizeCompressed, 0))
 			{   // failed to open archive
 				UnzipClose(huz);
-				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
+				free(aDataBuf);
 				return 0;
 			}
 			ze.CompressedSize = aSizeDeCompressed;
 			ze.UncompressedSize = aSizeDeCompressed;
 			if ((result = UnzipItemToBuffer(huz, aDataBuf, aSizeDeCompressed, &ze)))
-				g_VirtualFree(aDataBuf, 0, MEM_RELEASE);
+				free(aDataBuf);
 			else
 			{
 				UnzipClose(huz);
 				if (aDataEncrypted)
-					g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+					free(aDataEncrypted);
 				return aSizeDeCompressed;
 			}
 			UnzipClose(huz);
 			if (aDataEncrypted)
-				g_VirtualFree(aDataEncrypted, 0, MEM_RELEASE);
+				free(aDataEncrypted);
 		}
 	}
 	return 0;

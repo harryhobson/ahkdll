@@ -115,7 +115,7 @@ class CAutoMallocAFree
 {
 public:
 	CAutoMallocAFree() : m_pMem(0) {};
-	~CAutoMallocAFree() { if (m_pMem) SecureZeroMemory(m_pMem, m_sz); _freea(m_pMem); }
+	~CAutoMallocAFree() { if (m_pMem) g_memset(m_pMem, 0, m_sz); _freea(m_pMem); }
 	void Set(void *pMem, size_t sz){ m_sz = sz; m_pMem = pMem; }
 private:
 	void    *m_pMem;
@@ -241,6 +241,7 @@ enum CommandIDs {CONTROL_ID_FIRST = IDCANCEL + 1
 #define ERR_INVALID_LINE_IN_PROPERTY_DEF _T("Not a valid property getter/setter.")
 #define ERR_INVALID_GUI_NAME _T("Invalid Gui name.")
 #define ERR_INVALID_OPTION _T("Invalid option.") // Generic message used by Gui and GuiControl/Get.
+#define ERR_HOTKEY_IF_EXPR _T("Parameter #2 must match an existing #If expression.")
 #define ERR_INVALID_STRUCT _T("Invalid structure definition.")
 #define ERR_INVALID_STRUCT_IN_FUNC _T("Variable was not found in function.")
 #define ERR_INVALID_STRUCT_BIT_POINTER _T("Bit field must not be a pointer")
@@ -1004,7 +1005,7 @@ public:
 	LPTSTR ExpandExpression(int aArgIndex, ResultType &aResult, ExprTokenType *aResultToken
 		, LPTSTR &aTarget, LPTSTR &aDerefBuf, size_t &aDerefBufSize, LPTSTR aArgDeref[], size_t aExtraSize);
 	ResultType ExpressionToPostfix(ArgStruct &aArg);
-	ResultType EvaluateHotCriterionExpression(LPTSTR aHotkeyName); // L4: Called by MainWindowProc to handle an AHK_HOT_IF_EXPR message.
+	ResultType EvaluateHotCriterionExpression(); // Called by HotkeyCriterion::Eval().
 
 	ResultType Deref(Var *aOutputVar, LPTSTR aBuf);
 
@@ -2976,14 +2977,7 @@ public:
 };
 #endif // MINIDLL
 
-typedef HGLOBAL(WINAPI *_LoadResource)(HMODULE hModule, HRSRC hResInfo);
-typedef DWORD(WINAPI *_SizeofResource)(HMODULE hModule,HRSRC hResInfo);
-typedef LPVOID(WINAPI *_LockResource)(HGLOBAL hResData);
-typedef BOOL(WINAPI *_CryptStringToBinary)(LPCTSTR pszString, DWORD cchString, DWORD dwFlags, BYTE *pbBinary, DWORD *pcbBinary, DWORD *pdwSkip, DWORD *pdwFlags);
-typedef BOOL(WINAPI *_CryptStringToBinaryA)(LPCSTR pszString, DWORD cchString, DWORD dwFlags, BYTE *pbBinary, DWORD *pcbBinary, DWORD *pdwSkip, DWORD *pdwFlags);
-typedef LPVOID(WINAPI *_VirtualAlloc)(LPVOID lpAddress,SIZE_T dwSize,DWORD flAllocationType,DWORD flProtect);
-typedef BOOL(WINAPI *_VirtualFree)(LPVOID lpAddress,SIZE_T dwSize,DWORD dwFreeType);
-typedef HRESULT(WINAPI *_HashData)(BYTE *pbData,DWORD cbData,BYTE *pbHash,DWORD cbHash);
+typedef BOOL(WINAPI *_QueryPerformanceCounter)(LARGE_INTEGER *lpPerformanceCount);
 
 typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
     HANDLE ProcessHandle,
@@ -2995,6 +2989,9 @@ typedef NTSTATUS (NTAPI *PFN_NT_QUERY_INFORMATION_PROCESS) (
 typedef int (* ahkx_int_str)(LPTSTR ahkx_str); // ahkx N11
 typedef int (* ahkx_int_str_str)(LPTSTR ahkx_str, LPTSTR ahkx_str2); // ahkx N11
 
+
+typedef BOOL(_stdcall *MyCryptEncrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *, DWORD);
+typedef BOOL(_stdcall *MyCryptDecrypt)(HCRYPTKEY, HCRYPTHASH, BOOL, DWORD, BYTE *, DWORD *);
 
 class Script
 {

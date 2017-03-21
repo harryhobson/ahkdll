@@ -3491,15 +3491,16 @@ ResultType Line::WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aTe
 	{
 	case WINSET_ALWAYSONTOP:
 	{
-		if (   !(exstyle = GetWindowLong(target_window, GWL_EXSTYLE))   )
-			return OK;
 		HWND topmost_or_not;
 		switch(ConvertOnOffToggle(aValue))
 		{
 		case TOGGLED_ON: topmost_or_not = HWND_TOPMOST; break;
 		case TOGGLED_OFF: topmost_or_not = HWND_NOTOPMOST; break;
 		case NEUTRAL: // parameter was blank, so it defaults to TOGGLE.
-		case TOGGLE: topmost_or_not = (exstyle & WS_EX_TOPMOST) ? HWND_NOTOPMOST : HWND_TOPMOST; break;
+		case TOGGLE:
+			exstyle = GetWindowLong(target_window, GWL_EXSTYLE);
+			topmost_or_not = (exstyle & WS_EX_TOPMOST) ? HWND_NOTOPMOST : HWND_TOPMOST;
+			break;
 		default: return OK;
 		}
 		// SetWindowLong() didn't seem to work, at least not on some windows.  But this does.
@@ -3546,8 +3547,8 @@ ResultType Line::WinSet(LPTSTR aAttrib, LPTSTR aValue, LPTSTR aTitle, LPTSTR aTe
 		// since there seem to be no easy API calls to discover the colors of pixels in an HBRUSH),
 		// the following is not yet implemented: Use window's own class background color (via
 		// GetClassLong) if aValue is entirely blank.
-		if (  !(exstyle = GetWindowLong(target_window, GWL_EXSTYLE))  )
-			return OK;  // Do nothing on OSes that don't support it.
+
+		exstyle = GetWindowLong(target_window, GWL_EXSTYLE);
 		if (!_tcsicmp(aValue, _T("Off")))
 			// One user reported that turning off the attribute helps window's scrolling performance.
 			SetWindowLong(target_window, GWL_EXSTYLE, exstyle & ~WS_EX_LAYERED);
@@ -5660,9 +5661,11 @@ LRESULT CALLBACK MainWindowProc(HWND hWnd, UINT iMsg, WPARAM wParam, LPARAM lPar
 		// SendMessage, 1029,,,, %A_ScriptFullPath% - AutoHotkey  ; Same as above but not sent via TRANSLATE.
 		return GetCurrentProcessId(); // Don't use ReplyMessage because then our thread can't reply to itself with this answer.
 #ifndef MINIDLL
-	case AHK_HOT_IF_EXPR: // L4: HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
-		if ((int)wParam > -1 && (int)wParam < g_HotExprLineCount)
-			return g_HotExprLines[(int)wParam]->EvaluateHotCriterionExpression((LPTSTR)lParam);
+	case AHK_HOT_IF_EVAL: // HotCriterionAllowsFiring uses this to ensure expressions are evaluated only on the main thread.
+		// Ensure wParam is a valid criterion (might prevent shatter attacks):
+		for (HotkeyCriterion *cp = g_FirstHotExpr; cp; cp = cp->NextCriterion)
+			if ((WPARAM)cp == wParam)
+				return cp->Eval((LPTSTR)lParam);
 		return 0;
 #endif
 	case AHK_EXECUTE:   // sent from dll host # Naveen N9 
@@ -10355,7 +10358,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 			if (aSizeDeCompressed)
 			{
 				success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-				VirtualFree(aDataBuf,0,MEM_RELEASE);
+				free(aDataBuf);
 			}
 		}
 		if (!aSizeDeCompressed)
@@ -10403,7 +10406,7 @@ ResultType Line::FileInstall(LPTSTR aSource, LPTSTR aDest, LPTSTR aFlag)
 				if (aSizeDeCompressed)
 				{
 					success = WriteFile(hfile, aDataBuf, aSizeDeCompressed, &num_bytes_written, NULL);
-					VirtualFree(aDataBuf,0,MEM_RELEASE);
+					free(aDataBuf);
 				}
 			}
 			if (!aSizeDeCompressed)
@@ -13711,7 +13714,7 @@ CStringA **pStr = (CStringA **)
 CStringW **pStr = (CStringW **)
 #endif
 		_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-		memset(pStr, 0, i);
+		g_memset(pStr, 0, i);
 		for (i = 0; i < obj->marg_count; i++)  // Same loop as used in DynaToken::Create below, so maintain them together.
 		{
 			ExprTokenType &this_param = ((aParamCount-2) > i) ? *aParam[i + 2] : *aParam[i]; // *aParam[i] will not be used
@@ -13839,7 +13842,7 @@ CStringW **pStr = (CStringW **)
 			else
 			{
 				// Set shift info for parameters, -1 for definition in first item.
-				memset(obj->paramshift, -1, (obj->marg_count + 1) * sizeof(int));
+				g_memset(obj->paramshift, -1, (obj->marg_count + 1) * sizeof(int));
 				oParam.value_int64 = 2;
 				paramobj->Invoke(result_token, *aParam[1], IT_GET, param, 1);
 				if (!IS_NUMERIC(result_token.symbol))
@@ -13935,7 +13938,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 	CStringW **pStr = (CStringW **)
 #endif
 		_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-	memset(pStr, 0, i);
+	g_memset(pStr, 0, i);
 	
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
@@ -14241,7 +14244,7 @@ ResultType STDMETHODCALLTYPE DynaToken::Invoke(
 				delete pStr[arg_count];
 			continue;
 		}
-		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i]]; // Resolved for performance and convenience.
+		DYNAPARM &this_dyna_param = this->mdyna_param[this->paramshift[i - is_call]]; // Resolved for performance and convenience.
 		Var &output_var = *this_param.var;                 //
 		if (this_dyna_param.type == DLL_ARG_STR) // Native string type for current build config.
 		{
@@ -14885,7 +14888,7 @@ has_valid_return_type:
 	CStringW **pStr = (CStringW **)
 #endif
 		_alloca(i); // _alloca vs malloc can make a significant difference to performance in some cases.
-	memset(pStr, 0, i);
+	g_memset(pStr, 0, i);
 
 	// Above has already ensured that after the first parameter, there are either zero additional parameters
 	// or an even number of them.  In other words, each arg type will have an arg value to go with it.
@@ -17970,7 +17973,7 @@ BIF_DECL(BIF_VarSetCapacity)
 				{   // backup variables content to restore later
 					// usefull when size of a variable is changed without loosing its content, e.g. increase memory array
 					AUTO_MALLOCA(aBkpContents, BYTE*, aBkpCapacity);
-					memmove(aBkpContents, var.Contents(false), aBkpCapacity);
+					memcpy(aBkpContents, var.Contents(false), aBkpCapacity);
 				}
 				var.SetCapacity(new_capacity, true, false); // This also destroys the variables contents.
 				// in characters
@@ -17992,7 +17995,7 @@ BIF_DECL(BIF_VarSetCapacity)
 				{
 					// restore variables content if FillMemory parameter is not used and the size is apropriate
 					if (aParamCount < 3 && aBkpCapacity > 1 && (var.ByteCapacity()) > 1)
-						memmove(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
+						memcpy(var.Contents(false), aBkpContents, var.ByteCapacity() < aBkpCapacity ? var.ByteCapacity() : aBkpCapacity);
 					// By design, Assign() has already set the length of the variable to reflect new_capacity.
 					// This is not what is wanted in this case since it should be truly empty.
 					var.ByteLength() = 0;
@@ -18097,8 +18100,8 @@ BIF_DECL(BIF_ResourceLoadLibrary)
 		if (aSizeDeCompressed)
 		{
 			module = MemoryLoadLibrary(aDataBuf, aSizeDeCompressed);
-			SecureZeroMemory(aDataBuf, aSizeDeCompressed);
-			VirtualFree(aDataBuf,0,MEM_RELEASE);
+			g_memset(aDataBuf, 0, aSizeDeCompressed);
+			free(aDataBuf);
 		}
 	}
 	if (!aSizeDeCompressed)
@@ -18252,9 +18255,8 @@ BIF_DECL(BIF_ZipCreateFile)
 	if (aErrCode = ZipCreateFile(&hz, TokenToString(*aParam[0]), aPassword))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = (__int64)hz;
@@ -18268,9 +18270,8 @@ BIF_DECL(BIF_ZipOptions)
 	if (aErrCode = ZipOptions(&hz, (DWORD)TokenToInt64(*aParam[0])))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18292,17 +18293,15 @@ BIF_DECL(BIF_ZipAddFile)
 		aDestination = TokenToString(*aParam[2]);
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM1_INVALID);
+		return;
 	}
 	if (aErrCode = ZipAddFile((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource))
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18313,17 +18312,15 @@ BIF_DECL(BIF_ZipAddFolder)
 	DWORD aErrCode;
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM1_INVALID);
+		return;
 	}
 	if (aErrCode = ZipAddFolder((HZIP)TokenToInt64(*aParam[0]), TokenToString(*aParam[1])))
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18336,9 +18333,8 @@ BIF_DECL(BIF_ZipCloseFile)
 	if (aErrCode = ZipClose((HZIP)TokenToInt64(*aParam[0])))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18353,9 +18349,8 @@ BIF_DECL(BIF_ZipCreateBuffer)
 	if (aErrCode = ZipCreateBuffer(&hz, 0, (DWORD)TokenToInt64(*aParam[0]), aPassword))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = (__int64)hz;
@@ -18368,17 +18363,15 @@ BIF_DECL(BIF_ZipAddBuffer)
 	LPTSTR aDestination = TokenToString(*aParam[3]);
 	if (!TokenToInt64(*aParam[0]))
 	{
-		g_script.ScriptError(ERR_PARAM1_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM1_INVALID);
+		return;
 	}
 	if (aErrCode = ZipAddBuffer((HZIP)TokenToInt64(*aParam[0]), aDestination, aSource, (DWORD)TokenToInt64(*aParam[2])))
 	{
 		TCHAR	aMsg[100];
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.symbol = SYM_INTEGER;
 	aResultToken.value_int64 = 1;
@@ -18393,21 +18386,19 @@ BIF_DECL(BIF_ZipCloseBuffer)
 	HANDLE			aBase;
 	if (aParam[1]->symbol != SYM_VAR)
 	{
-		g_script.ScriptError(ERR_PARAM2_INVALID);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+		return;
 	}
 	if (aErrCode = ZipGetMemory((HZIP)TokenToInt64(*aParam[0]), (void **)&aBuffer, &aLen, &aBase))
 	{
 		ZipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-		g_script.ScriptError(aMsg);
-		aResultToken.symbol = SYM_STRING;
-		aResultToken.marker = _T("");
+		g_script.ThrowRuntimeException(aMsg);
+		return;
 	}
 	aResultToken.value_int64 = aLen;
 	aParam[1]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-	memmove(aParam[1]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-	memset((char*)aParam[1]->var->mCharContents + aResultToken.value_int64, 0, 2);
+	memcpy(aParam[1]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+	g_memset((char*)aParam[1]->var->mCharContents + aResultToken.value_int64, 0, 2);
 	// Free the memory now that we're done with it.
 	UnmapViewOfFile(aBuffer);
 	CloseHandle(aBase);
@@ -18429,15 +18420,13 @@ BIF_DECL(BIF_ZipInfo)
 	{
 		if (!TokenIsPureNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+			return;
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM3_REQUIRED);
+			return;
 		}
 		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), NULL))
 			goto error;
@@ -18449,12 +18438,12 @@ BIF_DECL(BIF_ZipInfo)
 	UnzipSetBaseDir(huz, _T(""));
 
 	ZIPENTRY	ze;
-	DWORD		numitems;
+	ULONGLONG	numitems;
 
 	IObject *aObject = Object::Create();
 
 	// Find out how many items are in the archive.
-	ze.Index = (DWORD)-1;
+	ze.Index = (ULONGLONG)-1;
 	if ((aErrCode = UnzipGetItem(huz, &ze)))
 		goto errorclose;
 	numitems = ze.Index;
@@ -18519,9 +18508,7 @@ errorclose:
 	aObject->Release();
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	g_script.ThrowRuntimeException(aMsg);
 }
 
 BIF_DECL(BIF_UnZip)
@@ -18534,15 +18521,13 @@ BIF_DECL(BIF_UnZip)
 	{
 		if (!TokenIsPureNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+			return;
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM3_REQUIRED);
+			return;
 		}
 		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), aPassword))
 			goto error;
@@ -18566,7 +18551,7 @@ BIF_DECL(BIF_UnZip)
 	LPTSTR aTargetName;
 	if (aParamCount > 2 && TokenIsPureNumeric(*aParam[2]))
 	{
-		ze.Index = (DWORD)TokenToInt64(*aParam[2]);
+		ze.Index = (ULONGLONG)TokenToInt64(*aParam[2]);
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		_tcscpy(aTargetDir + aDirLen, aParamCount > 3 ? TokenToString(*aParam[3]) : ze.Name + 1);
@@ -18575,10 +18560,10 @@ BIF_DECL(BIF_UnZip)
 	}
 	else
 	{
-		DWORD		numitems;
+		ULONGLONG	numitems;
 
 		// Find out how many items are in the archive.
-		ze.Index = (DWORD)-1;
+		ze.Index = (ULONGLONG)-1;
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		numitems = ze.Index;
@@ -18609,9 +18594,7 @@ errorclose:
 	UnzipClose(huz);
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	g_script.ThrowRuntimeException(aMsg);
 }
 
 BIF_DECL(BIF_UnZipBuffer)
@@ -18630,15 +18613,13 @@ BIF_DECL(BIF_UnZipBuffer)
 	{
 		if (!TokenIsPureNumeric(*aParam[1]))
 		{
-			g_script.ScriptError(ERR_PARAM2_INVALID);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM2_INVALID);
+			return;
 		}
 		else if (aParamCount < 3)
 		{
-			g_script.ScriptError(ERR_PARAM3_REQUIRED);
-			aResultToken.symbol = SYM_STRING;
-			aResultToken.marker = _T("");
+			g_script.ThrowRuntimeException(ERR_PARAM3_REQUIRED);
+			return;
 		}
 		if (aErrCode = UnzipOpenBuffer(&huz, (void*)TokenToInt64(*aParam[0]), (DWORD)TokenToInt64(*aParam[1]), aPassword))
 			goto error;
@@ -18656,7 +18637,7 @@ BIF_DECL(BIF_UnZipBuffer)
 
 	if (TokenIsPureNumeric(*aParam[2]))
 	{
-		ze.Index = (DWORD)TokenToInt64(*aParam[2]);
+		ze.Index = (ULONGLONG)TokenToInt64(*aParam[2]);
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		aResultToken.value_int64 = ze.UncompressedSize;
@@ -18666,12 +18647,12 @@ BIF_DECL(BIF_UnZipBuffer)
 			aResultToken.symbol = SYM_INTEGER;
 			return;
 		}
-		aBuffer = (unsigned char *)malloc(ze.UncompressedSize);
-		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
+		aBuffer = (unsigned char *)malloc((DWORD)ze.UncompressedSize);
+		if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
 			goto errorclose;
 		aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-		memmove(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-		memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+		memcpy(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+		g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 		free(aBuffer);
 		UnzipClose(huz);
 		aResultToken.symbol = SYM_INTEGER;
@@ -18679,9 +18660,9 @@ BIF_DECL(BIF_UnZipBuffer)
 	}
 	else
 	{
-		DWORD		numitems;
+		ULONGLONG	numitems;
 		// Find out how many items are in the archive.
-		ze.Index = (DWORD)-1;
+		ze.Index = (ULONGLONG)-1;
 		if ((aErrCode = UnzipGetItem(huz, &ze)))
 			goto errorclose;
 		numitems = ze.Index;
@@ -18700,12 +18681,12 @@ BIF_DECL(BIF_UnZipBuffer)
 				aResultToken.symbol = SYM_INTEGER;
 				return;
 			}
-			aBuffer = (unsigned char *)GlobalAlloc(GMEM_FIXED, ze.UncompressedSize);
-			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, ze.UncompressedSize, &ze))
+			aBuffer = (unsigned char *)GlobalAlloc(GMEM_FIXED, (DWORD)ze.UncompressedSize);
+			if (aErrCode = UnzipItemToBuffer(huz, aBuffer, (DWORD)ze.UncompressedSize, &ze))
 				goto errorclose;
 			aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64, true);
-			memmove(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
-			memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+			memcpy(aParam[2]->var->mCharContents, aBuffer, (SIZE_T)aResultToken.value_int64);
+			g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 			GlobalFree(aBuffer);
 			UnzipClose(huz);
 			aResultToken.symbol = SYM_INTEGER;
@@ -18722,9 +18703,7 @@ errorclose:
 	UnzipClose(huz);
 error:
 	UnzipFormatMessage(aErrCode, aMsg, _countof(aMsg));
-	g_script.ScriptError(aMsg);
-	aResultToken.symbol = SYM_STRING;
-	aResultToken.marker = _T("");
+	g_script.ThrowRuntimeException(aMsg);
 }
 
 BIF_DECL(BIF_CryptAES)
@@ -18771,15 +18750,15 @@ BIF_DECL(BIF_ZipRawMemory)
 			if (aParam[2]->symbol == SYM_VAR)
 			{
 				aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
-				memmove(aParam[2]->var->mCharContents, aDataBuf, (SIZE_T)aResultToken.value_int64);
-				memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+				memcpy(aParam[2]->var->mCharContents, aDataBuf, (SIZE_T)aResultToken.value_int64);
+				g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 			}
 			else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
-				memmove((void *)TokenToInt64(*aParam[2]), aDataBuf, (SIZE_T)aResultToken.value_int64);
+				memcpy((void *)TokenToInt64(*aParam[2]), aDataBuf, (SIZE_T)aResultToken.value_int64);
 
 		}
-		SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
-		VirtualFree(aDataBuf, 0, MEM_RELEASE);
+		g_memset(aDataBuf, 0, (size_t)aResultToken.value_int64);
+		free(aDataBuf);
 		return;
 	}
 	aResultToken.symbol = SYM_STRING;
@@ -18808,15 +18787,15 @@ BIF_DECL(BIF_UnZipRawMemory)
 				if (aParam[2]->symbol == SYM_VAR)
 				{
 					aParam[2]->var->SetCapacity((VarSizeType)aResultToken.value_int64 + sizeof(char) * 2);
-					memmove(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
-					memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
+					memcpy(aParam[2]->var->mCharContents,aDataBuf,(SIZE_T)aResultToken.value_int64);
+					g_memset((char*)aParam[2]->var->mCharContents + aResultToken.value_int64, 0, 2);
 				}
 				else if (TokenToInt64(*aParam[2]) > 1024) // Assume address
-					memmove((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
+					memcpy((void *)TokenToInt64(*aParam[2]),aDataBuf,(SIZE_T)aResultToken.value_int64);
 
 			}
-			SecureZeroMemory(aDataBuf, (size_t)aResultToken.value_int64);
-			VirtualFree(aDataBuf,0,MEM_RELEASE);
+			g_memset(aDataBuf, 0, (size_t)aResultToken.value_int64);
+			free(aDataBuf);
 			return;
 		}
 	}

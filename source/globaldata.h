@@ -28,15 +28,11 @@ GNU General Public License for more details.
 extern FuncLibrary sLib[FUNC_LIB_COUNT]; // function libraries
 extern LPSTR g_hWinAPI, g_hWinAPIlowercase; // loads WinAPI functions definitions from resource
 #endif
-extern _LoadResource g_LoadResource;
-extern _SizeofResource g_SizeofResource;
-extern _LockResource g_LockResource;
-extern _CryptStringToBinary g_CryptStringToBinary;
-extern _CryptStringToBinaryA g_CryptStringToBinaryA;
-extern _VirtualAlloc g_VirtualAlloc;
-extern _VirtualFree g_VirtualFree;
-extern _HashData g_HashData;
-extern HCUSTOMMODULE g_hMSVCR;
+
+extern HCUSTOMMODULE g_hNTDLL;
+extern _QueryPerformanceCounter g_QPC;
+extern double g_QPCtimer;
+extern double g_QPCfreq;
 #ifdef _USRDLL
 extern bool g_Reloading;
 extern bool g_Loading;
@@ -154,18 +150,13 @@ extern int g_HotkeyThrottleInterval;
 extern bool g_MaxThreadsBuffer;
 extern SendLevelType g_InputLevel;
 #ifndef MINIDLL
-extern HotCriterionType g_HotCriterion;
-extern LPTSTR g_HotWinTitle;
-extern LPTSTR g_HotWinText;
+extern HotkeyCriterion *g_HotCriterion;
 extern HotkeyCriterion *g_FirstHotCriterion, *g_LastHotCriterion;
 
 // Global variables for #if (expression). See globaldata.cpp for comments.
-extern int g_HotExprIndex;
-extern Line **g_HotExprLines;
-extern int g_HotExprLineCount;
-extern int g_HotExprLineCountMax;
 extern UINT g_HotExprTimeout;
 extern HWND g_HotExprLFW;
+extern HotkeyCriterion *g_FirstHotExpr, *g_LastHotExpr;
 
 extern int g_ScreenDPI;
 extern MenuTypeType g_MenuIsVisible;
@@ -280,6 +271,8 @@ extern TCHAR g_default_pwd8;
 extern TCHAR g_default_pwd9;
 extern TCHAR *g_default_pwd[];
 
+extern MyCryptEncrypt g_CryptEncrypt;
+extern MyCryptDecrypt g_CryptDecrypt;
 // 9 might be better than 10 because if the granularity/timer is a little
 // off on certain systems, a Sleep(10) might really result in a Sleep(20),
 // whereas a Sleep(9) is almost certainly a Sleep(10) on OS's such as
