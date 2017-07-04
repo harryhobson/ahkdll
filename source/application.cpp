@@ -2214,8 +2214,17 @@ void ResumeUnderlyingThread(LPTSTR aSavedErrorLevel)
 #endif
 	// Check if somebody has thrown an exception and it's not been caught yet
 	if (g->ThrownToken)
+	{
 		// Display an error message
-		g_script.UnhandledException(g->ThrownToken, g->ExcptLine);
+		// HH: ExitApp is called afterwards if g_ExitApp_on_exception is set to true
+		ResultType ExecUntil_result;
+		ExecUntil_result = g_script.UnhandledException(g->ThrownToken, g->ExcptLine);
+
+		if (g_ExitApp_on_exception)
+		{
+			g_script.ExitApp(ExecUntil_result == FAIL ? EXIT_ERROR : EXIT_EXIT);
+		}
+	}
 
 	// The following section handles the switch-over to the former/underlying "g" item:
 	--g_nThreads; // Other sections below might rely on this having been done early.
