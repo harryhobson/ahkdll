@@ -784,7 +784,7 @@
       <StringPooling Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</StringPooling>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</MinimalRebuild>
       <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">EnableFastChecks</BasicRuntimeChecks>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">MultiThreaded</RuntimeLibrary>
       <BufferSecurityCheck Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">true</BufferSecurityCheck>
       <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</EnableFiberSafeOptimizations>
       <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='DebugDll|Win32'">false</IntrinsicFunctions>
@@ -1049,7 +1049,7 @@
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Speed</FavorSizeOrSpeed>
     </ClCompile>
     <ClCompile>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">true</MultiProcessorCompilation>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">false</MinimalRebuild>
@@ -1057,7 +1057,7 @@
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release(mbcs)|Win32'">Speed</FavorSizeOrSpeed>
     </ClCompile>
     <ClCompile>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">true</MultiProcessorCompilation>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">false</MinimalRebuild>
@@ -1065,7 +1065,7 @@
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini(mbcs)|Win32'">Speed</FavorSizeOrSpeed>
     </ClCompile>
     <ClCompile>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">true</MultiProcessorCompilation>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">false</MinimalRebuild>
@@ -1073,7 +1073,7 @@
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='ReleaseDllMini|Win32'">Speed</FavorSizeOrSpeed>
     </ClCompile>
     <ClCompile>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">true</MultiProcessorCompilation>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</MinimalRebuild>
@@ -1082,7 +1082,7 @@
       <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='Self-contained|Win32'">false</EnableFiberSafeOptimizations>
     </ClCompile>
     <ClCompile>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">true</MultiProcessorCompilation>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Self-contained(mbcs)|Win32'">false</MinimalRebuild>
@@ -1127,13 +1127,13 @@
     <ClCompile />
     <ClCompile>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">false</MultiProcessorCompilation>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">true</MinimalRebuild>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug(mbcs)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">false</MultiProcessorCompilation>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">MultiThreaded</RuntimeLibrary>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">true</MinimalRebuild>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Self-contained(debug)|Win32'">Use</PrecompiledHeader>
     </ClCompile>
@@ -1260,7 +1260,7 @@
     <ClCompile>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">true</MultiProcessorCompilation>
       <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</IntrinsicFunctions>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">MultiThreaded</RuntimeLibrary>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</MinimalRebuild>
       <WholeProgramOptimization Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|Win32'">false</WholeProgramOptimization>
@@ -1274,7 +1274,7 @@
       <TargetEnvironment Condition="'$(Configuration)|$(Platform)'=='ReleaseDll|x64'">X64</TargetEnvironment>
     </Midl>
     <ClCompile>
-      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">true</MultiProcessorCompilation>
       <TreatWarningAsError Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">false</TreatWarningAsError>
       <MinimalRebuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDll(mbcs)|Win32'">false</MinimalRebuild>
@@ -1312,7 +1312,7 @@
       </LargeAddressAware>
     </Link>
     <ClCompile>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
       <MinimalRebuild>true</MinimalRebuild>
       <SmallerTypeCheck>false</SmallerTypeCheck>
